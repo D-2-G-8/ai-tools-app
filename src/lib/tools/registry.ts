@@ -61,10 +61,15 @@ export const TOOLS: ToolDefinition[] = [
   {
     key: "code-review",
     name: "Code Review",
-    description: "Performs a code review of the changes. A working implementation already exists — integration is pending.",
+    description: "AI Review of open GitLab merge requests -- V1 (single model), V2 (two models + a judge), or V3 (multi-agent, business-context-aware).",
     stageOrder: 5,
     benefitsFromContext: true,
-    status: "planned",
+    status: "active",
+    // Custom UI (see code-review-panel.tsx, special-cased into
+    // tools/[toolKey]/page.tsx) -- pulls diffs live from GitLab rather than
+    // running through the generic prompt+input runner, so defaultPrompts
+    // here isn't used to drive a run; kept only as the seed prompt shown if
+    // someone opens the Prompts tab for this tool.
     defaultPrompts: [
       {
         name: "Basic code review",

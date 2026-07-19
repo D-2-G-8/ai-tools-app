@@ -156,6 +156,10 @@ export const workspace = pgTable("workspace", {
   // Not secrets — URLs can be stored permanently. The tokens themselves live
   // only in the session cookie (see src/lib/session.ts), never end up here.
   gitlabUrl: text("gitlab_url"),
+  // Comma-separated GitLab project IDs/paths this workspace's AI Review
+  // pulls open MRs from (see src/lib/gitlab/client.ts, code-review-panel.tsx).
+  // Not a secret -- the GitLab token itself stays session-only.
+  gitlabProjectIds: text("gitlab_project_ids"),
   defaultLlmProviderUrl: text("default_llm_provider_url"),
   // Design System settings (see design-system pages under src/app/design-system).
   // The Figma file itself is only ever read through the Figma MCP connector
@@ -314,6 +318,22 @@ export const featureWorkflowDocument = pgTable(
   ],
 );
 
+// A single AI Review finding, as stored in run.findingsJson (see below) --
+// shape mirrors src/lib/code-review/schema.ts's zod findings schema.
+// Kept as a plain interface here (not imported from lib/code-review) so the
+// schema module has no dependency on the review-engine module.
+export interface CodeReviewFindingRecord {
+  file: string;
+  severity: "critical" | "high" | "medium";
+  bug: string;
+  why: string;
+  // Cross-review fields (V2/V3 only) -- how many independent reviewers
+  // agreed, and the judge's verdict. Absent for V1 (single reviewer, no
+  // reconciliation pass).
+  agreement?: number;
+  verdict?: "confirmed" | "needs_verification";
+}
+
 export const run = pgTable(
   "run",
   {
@@ -342,6 +362,17 @@ export const run = pgTable(
     // Set once a chat-style tool (e.g. Business Requirements) compiles its
     // final output into a project document — lets the UI link straight to it.
     resultDocumentId: uuid("result_document_id").references(() => document.id, { onDelete: "set null" }),
+    // AI Review (toolKey "code-review") fields -- nullable/unused by every
+    // other tool. See src/lib/code-review/*.ts and code-review-actions.ts.
+    // Findings are stored as jsonb rather than a child table: this is the
+    // full result of a single review run and is never queried piecemeal.
+    gitlabProjectId: text("gitlab_project_id"),
+    gitlabMrIid: text("gitlab_mr_iid"),
+    reviewVersion: varchar("review_version", { length: 8 }), // "v1" | "v2" | "v3"
+    findingsJson: jsonb("findings_json").$type<CodeReviewFindingRecord[]>(),
+    // Set once the user explicitly posts the findings comment back to the
+    // MR (a separate step from running the review -- see code-review-panel.tsx).
+    postedToGitlabAt: timestamp("posted_to_gitlab_at", { withTimezone: true }),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     costEstimateUsd: numeric("cost_estimate_usd", { precision: 10, scale: 6 }).notNull().default("0"),

@@ -9,8 +9,28 @@ import { ensureDefaultPrompts } from "@/lib/tools/prompts";
 import { SetupNotice } from "@/components/setup-notice";
 import { RunnerForm } from "@/components/runner-form";
 import { ChatStart, ChatConversation } from "@/components/chat-runner";
+import { CodeReviewPanel } from "@/components/code-review-panel";
+import { loadOpenMergeRequests } from "./code-review-actions";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * AI Review (see code-review-actions.ts / code-review-panel.tsx): pulls
+ * live open MRs from GitLab rather than driving a prompt+input run, so it
+ * gets its own loader and its own branch below -- same special-casing
+ * pattern this page already uses for chatMode tools.
+ */
+async function loadCodeReviewData() {
+  const workspaceId = await getCurrentWorkspaceId();
+  const { readiness, projects } = await loadOpenMergeRequests();
+  const documents = await db
+    .select({ id: document.id, filename: document.filename })
+    .from(document)
+    .where(and(eq(document.workspaceId, workspaceId), eq(document.status, "ready")))
+    .orderBy(document.filename);
+
+  return { ready: readiness.ready, setupMessage: readiness.message, projects, documents };
+}
 
 async function loadChatData(toolKey: string, runParam?: string, featureParam?: string) {
   const workspaceId = await getCurrentWorkspaceId();
@@ -79,6 +99,22 @@ export default async function ToolRunnerPage({
   const { toolKey } = await params;
   const tool = getTool(toolKey);
   if (!tool) notFound();
+
+  if (toolKey === "code-review") {
+    let data: Awaited<ReturnType<typeof loadCodeReviewData>> | null = null;
+    let loadError: unknown = null;
+    try {
+      data = await loadCodeReviewData();
+    } catch (err) {
+      loadError = err;
+    }
+
+    if (loadError || !data) {
+      return <SetupNotice error={loadError} />;
+    }
+
+    return <CodeReviewPanel ready={data.ready} setupMessage={data.setupMessage} projects={data.projects} documents={data.documents} />;
+  }
 
   if (tool.chatMode) {
     const sp = await searchParams;

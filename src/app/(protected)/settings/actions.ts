@@ -12,15 +12,17 @@ export async function saveGeneralSettings(formData: FormData) {
   const workspaceId = await getCurrentWorkspaceId();
 
   const gitlabUrl = String(formData.get("gitlabUrl") ?? "").trim();
+  const gitlabProjectIds = String(formData.get("gitlabProjectIds") ?? "").trim();
   const gitlabToken = String(formData.get("gitlabToken") ?? "").trim();
   const llmProviderUrl = String(formData.get("llmProviderUrl") ?? "").trim();
   const llmProviderToken = String(formData.get("llmProviderToken") ?? "").trim();
 
-  // URLs (not secret) — stored in the DB, persistently.
+  // URLs and project IDs (not secret) — stored in the DB, persistently.
   await db
     .update(workspace)
     .set({
       gitlabUrl: gitlabUrl || null,
+      gitlabProjectIds: gitlabProjectIds || null,
       defaultLlmProviderUrl: llmProviderUrl || null,
     })
     .where(eq(workspace.id, workspaceId));

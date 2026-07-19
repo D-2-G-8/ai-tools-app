@@ -94,6 +94,18 @@ export default async function SettingsPage() {
               </label>
             </div>
 
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-neutral-600">
+                GitLab project IDs for AI Review <span className="text-neutral-400">(comma-separated)</span>
+              </span>
+              <input
+                name="gitlabProjectIds"
+                defaultValue={ws?.gitlabProjectIds ?? ""}
+                placeholder="123, group/subgroup/project"
+                className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
+              />
+            </label>
+
             <div className="grid grid-cols-2 gap-4">
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-neutral-600">
