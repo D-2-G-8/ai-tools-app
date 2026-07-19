@@ -11,6 +11,7 @@ export const metadata: Metadata = {
 const navItems = [
   { href: "/", label: "Overview" },
   { href: "/documents", label: "Documents" },
+  { href: "/design-system", label: "Design System" },
   { href: "/history", label: "History" },
   { href: "/settings", label: "Settings" },
 ];

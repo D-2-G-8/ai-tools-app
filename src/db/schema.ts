@@ -8,6 +8,7 @@ import {
   numeric,
   boolean,
   vector,
+  jsonb,
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -23,6 +24,13 @@ import {
  * these tables — see src/lib/session.ts.
  */
 
+export const componentStackValues = [
+  "react-scss",
+  "react-css-modules",
+  "none",
+] as const;
+export type ComponentStack = (typeof componentStackValues)[number];
+
 export const workspace = pgTable("workspace", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: varchar("name", { length: 255 }).notNull().default("Default workspace"),
@@ -30,6 +38,14 @@ export const workspace = pgTable("workspace", {
   // only in the session cookie (see src/lib/session.ts), never end up here.
   gitlabUrl: text("gitlab_url"),
   defaultLlmProviderUrl: text("default_llm_provider_url"),
+  // Design System settings (see design-system pages under src/app/design-system).
+  // The Figma file itself is only ever read through the Figma MCP connector
+  // (during a Claude session) or, later, a per-user Figma token entered in
+  // Settings the same way the GitLab token works — never stored here.
+  figmaFileKey: text("figma_file_key"),
+  designComponentStack: varchar("design_component_stack", { length: 32 })
+    .notNull()
+    .default("react-css-modules"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -212,4 +228,105 @@ export const chatMessage = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("chat_message_run_idx").on(t.runId)],
+);
+
+/**
+ * Design System (see PLAN.md-equivalent notes in src/app/design-system):
+ * a browsable snapshot of the project's design tokens and components,
+ * synced from Figma. `design_token`/`design_component` are a SNAPSHOT, not
+ * a live mirror — re-syncing overwrites rows matched by (workspaceId, name)
+ * / (workspaceId, slug) rather than appending duplicates.
+ */
+
+export const designTokenCategoryValues = [
+  "color",
+  "typography",
+  "spacing",
+  "radius",
+  "shadow",
+  "duration",
+  "other",
+] as const;
+export type DesignTokenCategory = (typeof designTokenCategoryValues)[number];
+
+export const designToken = pgTable(
+  "design_token",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspace.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 128 }).notNull(), // e.g. "text-primary", "font-heading-1"
+    category: varchar("category", { length: 32 }).notNull(),
+    value: text("value").notNull(), // CSS-ready value, e.g. "#0B0B0C" or "400 16px/22px Inter"
+    description: text("description"),
+    figmaNodeId: varchar("figma_node_id", { length: 64 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("design_token_workspace_name_idx").on(t.workspaceId, t.name),
+    index("design_token_workspace_category_idx").on(t.workspaceId, t.category),
+  ],
+);
+
+export interface DesignComponentVariant {
+  name: string;
+  description?: string;
+}
+
+export interface DesignComponentState {
+  name: string;
+  description?: string;
+}
+
+export const designComponent = pgTable(
+  "design_component",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspace.id, { onDelete: "cascade" }),
+    slug: varchar("slug", { length: 64 }).notNull(), // "accordion", "button"
+    name: varchar("name", { length: 128 }).notNull(), // display name, e.g. "Accordion"
+    description: text("description"),
+    variants: jsonb("variants").$type<DesignComponentVariant[]>().notNull().default([]),
+    states: jsonb("states").$type<DesignComponentState[]>().notNull().default([]),
+    figmaNodeIds: jsonb("figma_node_ids").$type<string[]>().notNull().default([]),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("design_component_workspace_slug_idx").on(t.workspaceId, t.slug)],
+);
+
+export const mockupStatusValues = ["ready", "error"] as const;
+export type MockupStatus = (typeof mockupStatusValues)[number];
+
+/**
+ * A design mockup: a self-contained HTML page built from Design System
+ * tokens/components (see docs/conventions-equivalent notes). Mirrors the
+ * Blob-backed storage approach of `document` (src/app/documents), but kept
+ * as its own table since mockups render as live HTML rather than being
+ * chunked/embedded for RAG.
+ */
+export const mockup = pgTable(
+  "mockup",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspace.id, { onDelete: "cascade" }),
+    featureWorkflowId: uuid("feature_workflow_id").references(() => featureWorkflow.id, {
+      onDelete: "set null",
+    }),
+    name: varchar("name", { length: 255 }).notNull(),
+    filename: varchar("filename", { length: 512 }).notNull(),
+    blobUrl: text("blob_url").notNull(),
+    status: varchar("status", { length: 32 }).notNull().default("ready"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("mockup_workspace_idx").on(t.workspaceId)],
 );
