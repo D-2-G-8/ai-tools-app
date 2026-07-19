@@ -8,7 +8,7 @@ import { getCurrentWorkspaceId } from "@/db/workspace";
 import { getCurrentUser } from "@/db/users";
 import { getSession } from "@/lib/session";
 import { getEffectiveModel } from "@/lib/tools/model-settings";
-import { listOpenMergeRequests, fetchMrDiff, postMrComment, type GitlabAuth, type GitlabProjectMrs } from "@/lib/gitlab/client";
+import { listOpenMergeRequests, fetchMrDiff, postMrComment, describeGitlabError, type GitlabAuth, type GitlabProjectMrs } from "@/lib/gitlab/client";
 import { buildDiffPrompt } from "@/lib/code-review/prompt";
 import { runV1Review } from "@/lib/code-review/v1";
 import { runV2Review, V2_DEFAULT_REVIEWER_MODELS, V2_DEFAULT_JUDGE_MODEL } from "@/lib/code-review/v2";
@@ -103,7 +103,7 @@ export async function runReview(
   try {
     auth = await requireGitlabAuth();
   } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
+    return { error: describeGitlabError(err) };
   }
 
   try {
@@ -174,7 +174,7 @@ export async function runReview(
     revalidatePath(`/tools/${REVIEW_TOOL_KEY}`);
     return { runId: savedRun.id, findings, costUsd, truncated, mrTitle };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = describeGitlabError(err);
     await db.insert(runTable).values({
       workspaceId,
       toolKey: REVIEW_TOOL_KEY,
@@ -231,7 +231,7 @@ export async function estimateV3Review(
     const estimatedCostUsd = estimateV3CostUsd(diffPrompt.length, contextChars, V3_DEFAULT_AGENT_MODEL, V3_DEFAULT_JUDGE_MODEL);
     return { estimatedCostUsd };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
+    return { error: describeGitlabError(err) };
   }
 }
 
@@ -268,6 +268,6 @@ export async function postReviewToGitlab(runId: string, _prevState: PostToGitlab
     revalidatePath(`/tools/${REVIEW_TOOL_KEY}`);
     return { posted: true };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
+    return { error: describeGitlabError(err) };
   }
 }

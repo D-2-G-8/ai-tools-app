@@ -42,19 +42,63 @@ function apiBase(gitlabUrl: string): string {
   return `${gitlabUrl.replace(/\/+$/, "")}/api/v4`;
 }
 
+const GITLAB_FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * Node's fetch() (undici) throws a bare "fetch failed" Error on any
+ * network-level failure -- DNS lookup, TLS handshake, connection refused,
+ * timeout -- with the actual reason nested in `err.cause` (sometimes an
+ * AggregateError with one entry per attempted address for dual-stack
+ * lookups). Without unwrapping this, every unreachable-host failure in the
+ * AI Review UI shows the same useless "fetch failed" for every project ID,
+ * which is what actually prompted this: see the per-project errors from
+ * listOpenMergeRequests below.
+ */
+export function describeGitlabError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const seen = new Set<unknown>();
+  const parts: string[] = [];
+  let current: unknown = err;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    if (typeof AggregateError !== "undefined" && current instanceof AggregateError) {
+      const inner = current.errors.map((e) => (e instanceof Error ? e.message : String(e)));
+      parts.push(...inner.filter((m) => !parts.includes(m)));
+      break;
+    }
+    if (current instanceof Error) {
+      if (!parts.includes(current.message)) parts.push(current.message);
+      current = (current as { cause?: unknown }).cause;
+    } else {
+      parts.push(String(current));
+      break;
+    }
+  }
+  return parts.join(" -- caused by: ");
+}
+
 async function gitlabFetch<T>(
   { gitlabUrl, token }: GitlabAuth,
   path: string,
   init?: RequestInit,
 ): Promise<T> {
-  const res = await fetch(`${apiBase(gitlabUrl)}${path}`, {
-    ...init,
-    headers: {
-      "PRIVATE-TOKEN": token,
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${apiBase(gitlabUrl)}${path}`, {
+      ...init,
+      signal: AbortSignal.timeout(GITLAB_FETCH_TIMEOUT_MS),
+      headers: {
+        "PRIVATE-TOKEN": token,
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (err) {
+    // Rethrow with the unwrapped cause baked into the message -- this is
+    // what reaches the per-project `error` field and the run's errorMessage
+    // in code-review-actions.ts, so it needs to be diagnostic on its own.
+    throw new Error(`Could not reach ${apiBase(gitlabUrl)} -- ${describeGitlabError(err)}`);
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`GitLab API returned ${res.status} for ${path}: ${text.slice(0, 300)}`);
@@ -96,7 +140,7 @@ export async function listOpenMergeRequests(auth: GitlabAuth, projectIds: string
         }));
         return { projectId, mrs };
       } catch (err) {
-        return { projectId, mrs: [], error: err instanceof Error ? err.message : String(err) };
+        return { projectId, mrs: [], error: describeGitlabError(err) };
       }
     }),
   );
