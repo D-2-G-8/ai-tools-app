@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { db } from "@/db";
 import { document } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
@@ -105,6 +106,9 @@ export default async function DocumentsPage() {
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
+                    <Link href={`/documents/${doc.id}`} className="text-xs text-neutral-600 hover:underline">
+                      View
+                    </Link>
                     {doc.status === "error" && (
                       <form action={reingestDocument.bind(null, doc.id)}>
                         <button type="submit" className="text-xs text-neutral-600 hover:underline">
