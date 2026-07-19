@@ -18,4 +18,10 @@ export interface ToolDefinition {
   defaultPrompts: ToolDefaultPrompt[];
   /** Placeholder: implementation will appear as each tool is developed separately. */
   status: "planned" | "in_development" | "active";
+  /**
+   * Chat-style tools (currently: Business Requirements) run as a multi-turn
+   * interview instead of the single-shot prompt+input runner — see
+   * src/app/tools/[toolKey]/chat-actions.ts and chat-runner.tsx.
+   */
+  chatMode?: boolean;
 }

@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "./types";
+import { BUSINESS_REQUIREMENTS_SYSTEM_PROMPT } from "./business-requirements-template";
 
 /**
  * Registry of the platform's AI tools (PLAN.md, sections 1 and 8).
@@ -9,18 +10,15 @@ export const TOOLS: ToolDefinition[] = [
   {
     key: "business-requirements",
     name: "Business Requirements",
-    description: "Speeds up drafting business requirements for a feature based on project context.",
+    description: "Interviews you in chat and drafts a full Business Requirements document from a fixed template.",
     stageOrder: 1,
     benefitsFromContext: true,
-    status: "planned",
+    status: "active",
+    chatMode: true,
     defaultPrompts: [
       {
-        name: "Business requirements draft",
-        content:
-          "You are helping an analyst prepare business requirements for a new feature.\n" +
-          "Based on the feature description and the project context (uploaded documentation), formulate:\n" +
-          "1) the problem and goal, 2) the target audience, 3) key business scenarios, " +
-          "4) success criteria, 5) out of scope.\n\nFeature description: {{feature_description}}\n\nProject context: {{project_context}}",
+        name: "Business Requirements interview",
+        content: BUSINESS_REQUIREMENTS_SYSTEM_PROMPT,
       },
     ],
   },

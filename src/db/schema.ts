@@ -180,6 +180,9 @@ export const run = pgTable(
     status: varchar("status", { length: 32 }).notNull().default("completed"), // running | completed | error
     inputSummary: text("input_summary"),
     outputSummary: text("output_summary"),
+    // Set once a chat-style tool (e.g. Business Requirements) compiles its
+    // final output into a project document — lets the UI link straight to it.
+    resultDocumentId: uuid("result_document_id").references(() => document.id, { onDelete: "set null" }),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     costEstimateUsd: numeric("cost_estimate_usd", { precision: 10, scale: 6 }).notNull().default("0"),
@@ -190,4 +193,23 @@ export const run = pgTable(
     index("run_workspace_tool_idx").on(t.workspaceId, t.toolKey),
     index("run_feature_workflow_idx").on(t.featureWorkflowId),
   ],
+);
+
+/**
+ * Turn-by-turn transcript for chat-style tools (currently: Business
+ * Requirements). One `run` = one conversation. Kept separate from `run`
+ * itself so the transcript can grow freely without touching the run row.
+ */
+export const chatMessage = pgTable(
+  "chat_message",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => run.id, { onDelete: "cascade" }),
+    role: varchar("role", { length: 16 }).notNull(), // "user" | "assistant"
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("chat_message_run_idx").on(t.runId)],
 );
