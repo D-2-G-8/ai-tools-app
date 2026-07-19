@@ -101,6 +101,9 @@ export default async function DocumentsPage() {
                     <Link href={`/documents/${doc.id}/edit`} className="text-xs text-neutral-600 hover:underline">
                       Edit
                     </Link>
+                    <a href={`/documents/${doc.id}/download`} className="text-xs text-neutral-600 hover:underline">
+                      Download
+                    </a>
                     {doc.status === "error" && (
                       <form action={reingestDocument.bind(null, doc.id)}>
                         <button type="submit" className="text-xs text-neutral-600 hover:underline">

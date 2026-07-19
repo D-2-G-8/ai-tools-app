@@ -40,6 +40,9 @@ export default async function DocumentViewPage({
           <Link href={`/documents/${doc.id}/edit`} className="hover:underline">
             Edit
           </Link>
+          <a href={`/documents/${doc.id}/download`} className="hover:underline">
+            Download
+          </a>
           <a href={doc.blobUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
             Open original file
           </a>
