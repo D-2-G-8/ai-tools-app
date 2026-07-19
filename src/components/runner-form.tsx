@@ -26,29 +26,29 @@ export function RunnerForm({
     <div className="flex flex-col gap-4">
       <form action={formAction} className="flex flex-col gap-3 rounded-lg border border-neutral-200 bg-white p-5">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">Промпт</span>
+          <span className="text-neutral-600">Prompt</span>
           <select
             name="promptId"
             defaultValue={activePrompt?.id ?? ""}
             className="rounded-md border border-neutral-300 px-2 py-1.5 text-sm"
           >
-            {prompts.length === 0 && <option value="">(нет промптов — задай на вкладке «Промпты»)</option>}
+            {prompts.length === 0 && <option value="">(no prompts — add one on the "Prompts" tab)</option>}
             {prompts.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
-                {p.isActive ? " (активный)" : ""}
+                {p.isActive ? " (active)" : ""}
               </option>
             ))}
           </select>
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">Ввод</span>
+          <span className="text-neutral-600">Input</span>
           <textarea
             name="userInput"
             rows={6}
             required
-            placeholder="Опиши задачу / вставь diff / текст — в зависимости от инструмента"
+            placeholder="Describe the task / paste a diff / text — depending on the tool"
             className="rounded-md border border-neutral-300 px-3 py-2 text-sm font-mono"
           />
         </label>
@@ -56,7 +56,7 @@ export function RunnerForm({
         {benefitsFromContext && (
           <label className="flex items-center gap-2 text-sm text-neutral-600">
             <input type="checkbox" name="useContext" defaultChecked className="rounded" />
-            Использовать контекст проекта (RAG по загруженным документам)
+            Use project context (RAG over uploaded documents)
           </label>
         )}
 
@@ -65,7 +65,7 @@ export function RunnerForm({
           disabled={pending}
           className="self-start rounded-md bg-neutral-900 px-4 py-1.5 text-sm text-white hover:bg-neutral-700 disabled:opacity-50"
         >
-          {pending ? "Выполняется…" : "Запустить"}
+          {pending ? "Running…" : "Run"}
         </button>
       </form>
 
@@ -79,8 +79,8 @@ export function RunnerForm({
         <div className="rounded-lg border border-neutral-200 bg-white p-5">
           <div className="mb-3 flex items-center justify-between text-xs text-neutral-400">
             <span>
-              {state.inputTokens} / {state.outputTokens} токенов · ${state.costUsd?.toFixed(4)}
-              {state.usedContext ? " · с контекстом проекта" : ""}
+              {state.inputTokens} / {state.outputTokens} tokens · ${state.costUsd?.toFixed(4)}
+              {state.usedContext ? " · with project context" : ""}
             </span>
           </div>
           <pre className="whitespace-pre-wrap text-sm">{state.output}</pre>

@@ -21,20 +21,20 @@ export interface RunState {
 }
 
 /**
- * MVP-версия универсального раннера (PLAN.md, раздел 7, п.7).
- * Подстановка плейсхолдеров в промпте пока упрощённая (промпт + ввод + контекст
- * одним блоком) — полноценный шаблонизатор с {{переменными}} на конкретный
- * инструмент можно уточнить, когда дойдём до его отдельной проработки.
+ * MVP version of the universal runner (PLAN.md, section 7, item 7).
+ * Placeholder substitution in the prompt is still simplified (prompt + input +
+ * context as a single block) — a full templating engine with {{variables}} for a
+ * specific tool can be refined once we get to working on it separately.
  */
 export async function runTool(toolKey: string, _prevState: RunState, formData: FormData): Promise<RunState> {
   const tool = getTool(toolKey);
-  if (!tool) return { error: "Инструмент не найден" };
+  if (!tool) return { error: "Tool not found" };
 
   const promptId = String(formData.get("promptId") ?? "");
   const userInput = String(formData.get("userInput") ?? "").trim();
   const useContext = formData.get("useContext") === "on";
 
-  if (!userInput) return { error: "Заполни ввод перед запуском" };
+  if (!userInput) return { error: "Fill in the input before running" };
 
   const workspaceId = await getDefaultWorkspaceId();
 
@@ -67,14 +67,14 @@ export async function runTool(toolKey: string, _prevState: RunState, formData: F
         usedContext = true;
       }
     } catch {
-      // Нет документов/эмбеддингов/ключа — просто работаем без контекста.
+      // No documents/embeddings/key — just proceed without context.
     }
   }
 
   const promptParts = [
     promptContent,
-    `Задача от пользователя:\n${userInput}`,
-    contextBlock ? `Релевантный контекст проекта:\n${contextBlock}` : "",
+    `Task from the user:\n${userInput}`,
+    contextBlock ? `Relevant project context:\n${contextBlock}` : "",
   ].filter(Boolean);
 
   try {

@@ -9,19 +9,19 @@ import { getDefaultWorkspaceId } from "@/db/workspace";
 import { ingestMarkdownDocument } from "@/lib/ingest/pipeline";
 
 /**
- * MVP: только .md, серверная загрузка (через Server Action, файл в FormData).
- * Для файлов больше нескольких МБ стоит перейти на клиентскую загрузку
- * (@vercel/blob client upload) — см. README "Известные ограничения".
+ * MVP: .md only, server-side upload (via Server Action, file in FormData).
+ * For files larger than a few MB, switch to client-side upload
+ * (@vercel/blob client upload) — see the README "Known limitations".
  */
 export async function uploadDocument(formData: FormData) {
   const workspaceId = await getDefaultWorkspaceId();
   const file = formData.get("file");
 
   if (!(file instanceof File)) {
-    throw new Error("Файл не найден в форме");
+    throw new Error("File not found in the form");
   }
   if (!file.name.toLowerCase().endsWith(".md")) {
-    throw new Error("На этом этапе поддерживаются только .md файлы");
+    throw new Error("Only .md files are supported at this stage");
   }
 
   const blob = await put(`documents/${Date.now()}-${file.name}`, file, {
@@ -45,8 +45,8 @@ export async function uploadDocument(formData: FormData) {
   try {
     await ingestMarkdownDocument(doc.id);
   } catch {
-    // Статус документа уже помечен как error внутри ingestMarkdownDocument —
-    // здесь просто не даём серверному экшену упасть с 500.
+    // The document status is already marked as error inside ingestMarkdownDocument —
+    // here we just keep the server action from failing with a 500.
   }
 
   revalidatePath("/documents");

@@ -1,3 +1,11 @@
+onlyBuiltDependencies:
+  # esbuild is needed by tsx/drizzle-kit (including for pnpm db:migrate and the
+  # auto-migration during build) — without approval its native postinstall
+  # doesn't run, and it fails at runtime.
+  - esbuild
+
 ignoredBuiltDependencies:
+  # Optional Next.js dependencies that aren't used in this project
+  # (sharp — image transformation, unrs-resolver — an additional module resolver).
   - sharp
   - unrs-resolver

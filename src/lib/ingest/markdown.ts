@@ -20,7 +20,7 @@ interface Section {
 const HEADING_RE = /^(#{1,6})\s+(.*)$/;
 const FENCE_RE = /^(```|~~~)/;
 
-/** Достаёт frontmatter и первый заголовок как title. */
+/** Extracts the frontmatter and the first heading as the title. */
 export function parseMarkdown(raw: string): ParsedMarkdown {
   const { data, content } = matter(raw);
   const titleFromFrontmatter =
@@ -43,8 +43,8 @@ export function parseMarkdown(raw: string): ParsedMarkdown {
 }
 
 /**
- * Делит markdown на секции по заголовкам, не путая '#' внутри код-блоков
- * с настоящими заголовками.
+ * Splits markdown into sections by headings, without confusing a '#' inside
+ * code blocks with real headings.
  */
 function splitIntoSections(content: string): Section[] {
   const sections: Section[] = [];
@@ -91,9 +91,9 @@ function splitIntoSections(content: string): Section[] {
 }
 
 /**
- * Внутри секции делит текст на "единицы" — абзацы, при этом код-блок или
- * markdown-таблица всегда остаются одной неделимой единицей, чтобы чанк
- * не мог оборвать их посередине.
+ * Within a section, splits the text into "units" — paragraphs, while a code
+ * block or a markdown table always stays a single indivisible unit, so that a
+ * chunk cannot break them in the middle.
  */
 function splitSectionIntoUnits(lines: string[]): string[] {
   const units: string[] = [];
@@ -113,7 +113,7 @@ function splitSectionIntoUnits(lines: string[]): string[] {
 
     if (isFenceLine) {
       if (!insideFence) {
-        // старт код-блока — закрыть предыдущий текстовый абзац
+        // start of a code block — close the previous text paragraph
         if (!insideTable) flush();
         insideFence = true;
       } else {
@@ -158,7 +158,7 @@ function splitSectionIntoUnits(lines: string[]): string[] {
   return units;
 }
 
-const DEFAULT_MAX_CHARS = 3200; // ~700-800 токенов
+const DEFAULT_MAX_CHARS = 3200; // ~700-800 tokens
 const DEFAULT_OVERLAP_CHARS = 200;
 
 export interface ChunkOptions {
@@ -166,7 +166,7 @@ export interface ChunkOptions {
   overlapChars?: number;
 }
 
-/** Основная функция: markdown -> список чанков с heading path, готовых для эмбеддинга. */
+/** Main function: markdown -> list of chunks with heading path, ready for embedding. */
 export function chunkMarkdown(raw: string, options: ChunkOptions = {}): MarkdownChunk[] {
   const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
   const overlapChars = options.overlapChars ?? DEFAULT_OVERLAP_CHARS;
@@ -191,7 +191,7 @@ export function chunkMarkdown(raw: string, options: ChunkOptions = {}): Markdown
     };
 
     for (const unit of units) {
-      // Единица сама по себе больше лимита (например, длинный код-блок) — кладём как отдельный чанк.
+      // The unit itself exceeds the limit (e.g. a long code block) — store it as a separate chunk.
       if (unit.length > maxChars) {
         pushChunk();
         current = "";
@@ -201,7 +201,7 @@ export function chunkMarkdown(raw: string, options: ChunkOptions = {}): Markdown
 
       if (current.length + unit.length + 2 > maxChars) {
         pushChunk();
-        // небольшой overlap для связности контекста между соседними чанками
+        // a small overlap for context continuity between adjacent chunks
         const tail = current.slice(-overlapChars);
         current = tail ? `${tail}\n\n${unit}` : unit;
       } else {
@@ -211,6 +211,6 @@ export function chunkMarkdown(raw: string, options: ChunkOptions = {}): Markdown
     pushChunk();
   }
 
-  // Перенумеровать по порядку во всём документе.
+  // Renumber in order across the whole document.
   return chunks.map((c, i) => ({ ...c, chunkIndex: i }));
 }

@@ -57,21 +57,21 @@ export default async function ToolStatsPage({
       <div className="flex flex-col gap-8">
         <section>
           <h2 className="text-sm font-medium text-neutral-600 mb-2">
-            Фактическая статистика по прогонам
+            Actual run statistics
           </h2>
           {!hasHistory ? (
             <p className="text-sm text-neutral-400">
-              Прогонов ещё не было — данные появятся после первого запуска этого инструмента.
+              No runs yet — data will appear after the first run of this tool.
             </p>
           ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-neutral-200 text-left text-neutral-500">
-                  <th className="py-2 font-medium">Модель</th>
-                  <th className="py-2 font-medium">Прогонов</th>
-                  <th className="py-2 font-medium">Ср. вход/выход токенов</th>
-                  <th className="py-2 font-medium">Ср. стоимость</th>
-                  <th className="py-2 font-medium">Всего потрачено</th>
+                  <th className="py-2 font-medium">Model</th>
+                  <th className="py-2 font-medium">Runs</th>
+                  <th className="py-2 font-medium">Avg in/out tokens</th>
+                  <th className="py-2 font-medium">Avg cost</th>
+                  <th className="py-2 font-medium">Total spent</th>
                 </tr>
               </thead>
               <tbody>
@@ -93,18 +93,18 @@ export default async function ToolStatsPage({
 
         <section>
           <h2 className="text-sm font-medium text-neutral-600 mb-2">
-            Оценка «на будущее» (по прайсу моделей)
+            Forward-looking estimate (based on model pricing)
           </h2>
           <p className="mb-3 text-xs text-neutral-400">
-            Условный запрос: 20 000 входных токенов (промпт + контекст) + 2 000 выходных.
-            Реальные цифры для этого инструмента появятся во вкладке выше после первых прогонов.
+            Sample request: 20,000 input tokens (prompt + context) + 2,000 output.
+            Real numbers for this tool will appear in the tab above after the first runs.
           </p>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-neutral-200 text-left text-neutral-500">
-                <th className="py-2 font-medium">Модель</th>
-                <th className="py-2 font-medium">Цена за 1M вход/выход</th>
-                <th className="py-2 font-medium">Оценка за запрос</th>
+                <th className="py-2 font-medium">Model</th>
+                <th className="py-2 font-medium">Price per 1M in/out</th>
+                <th className="py-2 font-medium">Estimate per request</th>
               </tr>
             </thead>
             <tbody>

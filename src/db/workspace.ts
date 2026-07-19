@@ -2,9 +2,9 @@ import { db } from "./index";
 import { workspace } from "./schema";
 
 /**
- * Однопользовательский режим: в приложении всегда один workspace.
- * Функция идемпотентна — если workspace ещё не создан (например, забыли
- * прогнать `pnpm db:setup`), создаёт его на лету.
+ * Single-user mode: the app always has exactly one workspace.
+ * The function is idempotent — if the workspace hasn't been created yet
+ * (for example, `pnpm db:setup` was forgotten), it creates it on the fly.
  */
 let cachedWorkspaceId: string | null = null;
 

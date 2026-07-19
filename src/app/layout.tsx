@@ -5,14 +5,14 @@ import { TOOLS } from "@/lib/tools/registry";
 
 export const metadata: Metadata = {
   title: "AI Tools Platform",
-  description: "Платформа AI-инструментов для полного цикла ведения фичи",
+  description: "AI tools platform for the full feature lifecycle",
 };
 
 const navItems = [
-  { href: "/", label: "Обзор" },
-  { href: "/documents", label: "Документы" },
-  { href: "/history", label: "История" },
-  { href: "/settings", label: "Настройки" },
+  { href: "/", label: "Overview" },
+  { href: "/documents", label: "Documents" },
+  { href: "/history", label: "History" },
+  { href: "/settings", label: "Settings" },
 ];
 
 export default function RootLayout({
@@ -21,7 +21,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ru" className="h-full antialiased">
+    <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex bg-neutral-50 text-neutral-900 font-sans">
         <aside className="w-64 shrink-0 border-r border-neutral-200 bg-white p-4 flex flex-col gap-6">
           <div className="text-lg font-semibold px-2">AI Tools Platform</div>
@@ -40,7 +40,7 @@ export default function RootLayout({
 
           <div className="flex flex-col gap-1">
             <div className="px-2 text-xs font-medium uppercase tracking-wide text-neutral-400">
-              Инструменты
+              Tools
             </div>
             {TOOLS.map((tool) => (
               <Link
@@ -51,7 +51,7 @@ export default function RootLayout({
                 <span>{tool.name}</span>
                 {tool.status !== "active" && (
                   <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-400">
-                    {tool.status === "planned" ? "план" : "в работе"}
+                    {tool.status === "planned" ? "planned" : "in progress"}
                   </span>
                 )}
               </Link>

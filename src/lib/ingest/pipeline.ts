@@ -5,20 +5,20 @@ import { chunkMarkdown, parseMarkdown } from "./markdown";
 import { embedTexts } from "./embed";
 
 /**
- * Инжест одного .md документа: скачать из Blob -> распарсить -> начанковать
- * по заголовкам -> получить эмбеддинги -> записать в document_chunk.
+ * Ingest of a single .md document: download from Blob -> parse -> chunk by
+ * headings -> get embeddings -> write into document_chunk.
  *
- * MVP: вызывается синхронно сразу после загрузки файла (см.
- * app/documents/actions.ts). Для больших пачек документов стоит вынести в
- * фоновую задачу (Inngest) — см. PLAN.md, раздел 2 (стек).
+ * MVP: called synchronously right after the file upload (see
+ * app/documents/actions.ts). For large batches of documents it should be moved
+ * into a background job (Inngest) — see PLAN.md, section 2 (stack).
  */
 export async function ingestMarkdownDocument(documentId: string): Promise<void> {
   const [doc] = await db.select().from(document).where(eq(document.id, documentId)).limit(1);
-  if (!doc) throw new Error(`Документ ${documentId} не найден`);
+  if (!doc) throw new Error(`Document ${documentId} not found`);
 
   try {
     const res = await fetch(doc.blobUrl);
-    if (!res.ok) throw new Error(`Не удалось скачать файл из Blob (${res.status})`);
+    if (!res.ok) throw new Error(`Failed to download the file from Blob (${res.status})`);
     const raw = await res.text();
 
     const { title } = parseMarkdown(raw);
@@ -27,7 +27,7 @@ export async function ingestMarkdownDocument(documentId: string): Promise<void> 
     if (chunks.length === 0) {
       await db
         .update(document)
-        .set({ status: "error", errorMessage: "Документ пустой после парсинга", updatedAt: new Date() })
+        .set({ status: "error", errorMessage: "Document is empty after parsing", updatedAt: new Date() })
         .where(eq(document.id, documentId));
       return;
     }
@@ -67,7 +67,7 @@ export async function ingestMarkdownDocument(documentId: string): Promise<void> 
   }
 }
 
-/** Векторный поиск релевантных чанков для контекста (RAG). */
+/** Vector search for relevant chunks to build context (RAG). */
 export async function searchRelevantChunks(workspaceId: string, queryEmbedding: number[], limit = 8) {
   const { sql } = await import("drizzle-orm");
   return db.execute(sql`

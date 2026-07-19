@@ -6,7 +6,7 @@ import { getDefaultWorkspaceId } from "@/db/workspace";
 import { TOOLS } from "@/lib/tools/registry";
 import { SetupNotice } from "@/components/setup-notice";
 
-// Данные всегда живые (БД/сессия) — не кэшировать статически.
+// Data is always live (DB/session) — do not cache statically.
 export const dynamic = "force-dynamic";
 
 async function loadOverviewData() {
@@ -55,33 +55,33 @@ export default async function OverviewPage() {
   return (
     <div className="flex flex-col gap-8 max-w-4xl">
       <div>
-        <h1 className="text-2xl font-semibold">Обзор</h1>
-        <p className="mt-1 text-neutral-500">Контекст проекта, история и инструменты — на одном экране.</p>
+        <h1 className="text-2xl font-semibold">Overview</h1>
+        <p className="mt-1 text-neutral-500">Project context, history, and tools — all on one screen.</p>
       </div>
 
       <div className="grid grid-cols-3 gap-4">
         <div className="rounded-lg border border-neutral-200 bg-white p-4">
-          <div className="text-xs uppercase tracking-wide text-neutral-400">Документы</div>
+          <div className="text-xs uppercase tracking-wide text-neutral-400">Documents</div>
           <div className="mt-1 text-2xl font-semibold">
             {docCounts?.ready ?? 0}/{docCounts?.total ?? 0}
           </div>
-          <div className="text-xs text-neutral-400">готовы / загружено</div>
+          <div className="text-xs text-neutral-400">ready / uploaded</div>
         </div>
         <div className="rounded-lg border border-neutral-200 bg-white p-4">
-          <div className="text-xs uppercase tracking-wide text-neutral-400">Фичи в работе</div>
+          <div className="text-xs uppercase tracking-wide text-neutral-400">Features in progress</div>
           <div className="mt-1 text-2xl font-semibold">{inProgressFeatures.length}</div>
         </div>
         <div className="rounded-lg border border-neutral-200 bg-white p-4">
-          <div className="text-xs uppercase tracking-wide text-neutral-400">Инструментов</div>
+          <div className="text-xs uppercase tracking-wide text-neutral-400">Tools</div>
           <div className="mt-1 text-2xl font-semibold">{TOOLS.length}</div>
         </div>
       </div>
 
       <section>
-        <h2 className="text-sm font-medium text-neutral-600 mb-2">Незавершённые фичи</h2>
+        <h2 className="text-sm font-medium text-neutral-600 mb-2">Unfinished features</h2>
         {inProgressFeatures.length === 0 ? (
           <p className="text-sm text-neutral-400">
-            Пока пусто. Начни фичу с любого инструмента — прогресс появится здесь.
+            Nothing here yet. Start a feature from any tool — progress will show up here.
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
@@ -98,9 +98,9 @@ export default async function OverviewPage() {
       </section>
 
       <section>
-        <h2 className="text-sm font-medium text-neutral-600 mb-2">Последние прогоны</h2>
+        <h2 className="text-sm font-medium text-neutral-600 mb-2">Recent runs</h2>
         {recentRuns.length === 0 ? (
-          <p className="text-sm text-neutral-400">Прогонов ещё не было.</p>
+          <p className="text-sm text-neutral-400">No runs yet.</p>
         ) : (
           <ul className="flex flex-col gap-2">
             {recentRuns.map((r) => (
@@ -108,7 +108,7 @@ export default async function OverviewPage() {
                 <div className="flex items-center justify-between">
                   <span className="font-medium">{r.toolKey}</span>
                   <span className="text-xs text-neutral-400">
-                    {r.inputTokens + r.outputTokens} токенов · ${Number(r.costEstimateUsd).toFixed(4)}
+                    {r.inputTokens + r.outputTokens} tokens · ${Number(r.costEstimateUsd).toFixed(4)}
                   </span>
                 </div>
               </li>
@@ -118,7 +118,7 @@ export default async function OverviewPage() {
       </section>
 
       <section>
-        <h2 className="text-sm font-medium text-neutral-600 mb-2">Инструменты</h2>
+        <h2 className="text-sm font-medium text-neutral-600 mb-2">Tools</h2>
         <div className="grid grid-cols-2 gap-3">
           {TOOLS.map((tool) => (
             <Link

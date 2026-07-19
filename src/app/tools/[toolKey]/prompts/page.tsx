@@ -44,7 +44,7 @@ export default async function ToolPromptsPage({
         <section className="flex flex-col gap-3">
           {prompts.length === 0 && (
             <p className="text-sm text-neutral-400">
-              Дефолтных промптов для этого инструмента ещё нет — добавь свой ниже.
+              No default prompts for this tool yet — add your own below.
             </p>
           )}
           {prompts.map((p) => (
@@ -59,17 +59,17 @@ export default async function ToolPromptsPage({
                   <div className="flex shrink-0 items-center gap-2">
                     {p.isDefault && (
                       <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-500">
-                        дефолтный
+                        default
                       </span>
                     )}
                     {p.isActive ? (
                       <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700">
-                        активен
+                        active
                       </span>
                     ) : (
                       <form action={setActivePrompt.bind(null, toolKey, p.id)}>
                         <button type="submit" className="text-xs text-neutral-500 hover:underline">
-                          Сделать активным
+                          Set active
                         </button>
                       </form>
                     )}
@@ -86,16 +86,16 @@ export default async function ToolPromptsPage({
                     type="submit"
                     className="rounded-md border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-50"
                   >
-                    Сохранить
+                    Save
                   </button>
                   <span className="text-xs text-neutral-400">
-                    Плейсхолдеры вида {"{{"}имя{"}}"} подставляются при запуске
+                    Placeholders like {"{{"}name{"}}"} are substituted at run time
                   </span>
                 </div>
               </form>
               <form action={deletePrompt.bind(null, toolKey, p.id)} className="mt-1">
                 <button type="submit" className="text-xs text-red-600 hover:underline">
-                  Удалить
+                  Delete
                 </button>
               </form>
             </div>
@@ -103,17 +103,17 @@ export default async function ToolPromptsPage({
         </section>
 
         <section className="rounded-lg border border-dashed border-neutral-300 p-4">
-          <h2 className="text-sm font-medium text-neutral-700 mb-3">Новый промпт</h2>
+          <h2 className="text-sm font-medium text-neutral-700 mb-3">New prompt</h2>
           <form action={createPrompt.bind(null, toolKey)} className="flex flex-col gap-2">
             <input
               name="name"
-              placeholder="Название"
+              placeholder="Name"
               required
               className="rounded-md border border-neutral-300 px-2 py-1 text-sm"
             />
             <textarea
               name="content"
-              placeholder="Текст промпта"
+              placeholder="Prompt text"
               required
               rows={4}
               className="rounded-md border border-neutral-300 px-2 py-1.5 text-sm font-mono"
@@ -122,7 +122,7 @@ export default async function ToolPromptsPage({
               type="submit"
               className="self-start rounded-md bg-neutral-900 px-4 py-1.5 text-sm text-white hover:bg-neutral-700"
             >
-              Добавить
+              Add
             </button>
           </form>
         </section>

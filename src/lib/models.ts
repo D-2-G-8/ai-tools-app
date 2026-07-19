@@ -1,8 +1,8 @@
 /**
- * Каталог моделей и цен для вкладки "Статистика" (оценка стоимости запроса).
- * Цены — $ за 1M токенов, состояние на июль 2026 (см. PLAN.md, раздел 11).
- * ВАЖНО: цены провайдеров меняются — периодически сверяй с
- * https://platform.claude.com/docs/en/about-claude/pricing и обновляй здесь.
+ * Catalog of models and prices for the "Statistics" tab (request cost estimation).
+ * Prices are in $ per 1M tokens, as of July 2026 (see PLAN.md, section 11).
+ * IMPORTANT: provider prices change — periodically cross-check against
+ * https://platform.claude.com/docs/en/about-claude/pricing and update here.
  */
 export interface ModelInfo {
   id: string;
@@ -16,7 +16,7 @@ export interface ModelInfo {
 export const AVAILABLE_MODELS: ModelInfo[] = [
   {
     id: "claude-sonnet-4-5",
-    label: "Claude Sonnet (по умолчанию)",
+    label: "Claude Sonnet (default)",
     provider: "anthropic",
     inputPricePerMTok: 2,
     outputPricePerMTok: 10,
@@ -24,14 +24,14 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
   },
   {
     id: "claude-haiku-4-5",
-    label: "Claude Haiku (быстрее и дешевле)",
+    label: "Claude Haiku (faster and cheaper)",
     provider: "anthropic",
     inputPricePerMTok: 1,
     outputPricePerMTok: 5,
   },
   {
     id: "claude-opus-4-5",
-    label: "Claude Opus (максимальное качество)",
+    label: "Claude Opus (maximum quality)",
     provider: "anthropic",
     inputPricePerMTok: 5,
     outputPricePerMTok: 25,

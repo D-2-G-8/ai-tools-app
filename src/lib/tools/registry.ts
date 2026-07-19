@@ -1,51 +1,51 @@
 import type { ToolDefinition } from "./types";
 
 /**
- * Реестр AI-инструментов платформы (PLAN.md, раздел 1 и 8).
- * Дефолтные промпты — черновые отправные точки, пользователь может их
- * менять/дополнять на вкладке "Промпты" каждого инструмента (prompt_template).
+ * Registry of the platform's AI tools (PLAN.md, sections 1 and 8).
+ * The default prompts are draft starting points; the user can edit or extend
+ * them on the "Prompts" tab of each tool (prompt_template).
  */
 export const TOOLS: ToolDefinition[] = [
   {
     key: "business-requirements",
-    name: "Бизнес-требования",
-    description: "Ускоряет подготовку бизнес-требований по фиче на основе контекста проекта.",
+    name: "Business Requirements",
+    description: "Speeds up drafting business requirements for a feature based on project context.",
     stageOrder: 1,
     benefitsFromContext: true,
     status: "planned",
     defaultPrompts: [
       {
-        name: "Черновик бизнес-требований",
+        name: "Business requirements draft",
         content:
-          "Ты помогаешь аналитику подготовить бизнес-требования к новой фиче.\n" +
-          "На основе описания фичи и контекста проекта (загруженной документации) сформулируй:\n" +
-          "1) проблему и цель, 2) целевую аудиторию, 3) ключевые бизнес-сценарии, " +
-          "4) критерии успеха, 5) вне скоупа.\n\nОписание фичи: {{feature_description}}\n\nКонтекст проекта: {{project_context}}",
+          "You are helping an analyst prepare business requirements for a new feature.\n" +
+          "Based on the feature description and the project context (uploaded documentation), formulate:\n" +
+          "1) the problem and goal, 2) the target audience, 3) key business scenarios, " +
+          "4) success criteria, 5) out of scope.\n\nFeature description: {{feature_description}}\n\nProject context: {{project_context}}",
       },
     ],
   },
   {
     key: "system-analysis",
-    name: "Системный анализ / проектирование",
-    description: "Помогает проектировать решение и писать системный анализ по фиче.",
+    name: "System Analysis / Design",
+    description: "Helps design the solution and write the system analysis for a feature.",
     stageOrder: 2,
     benefitsFromContext: true,
     status: "planned",
     defaultPrompts: [
       {
-        name: "Черновик системного анализа",
+        name: "System analysis draft",
         content:
-          "Ты выступаешь системным аналитиком. На основе бизнес-требований и контекста проекта " +
-          "(существующая архитектура, документация) предложи техническое решение: " +
-          "затрагиваемые компоненты, изменения контрактов/API, риски и открытые вопросы.\n\n" +
-          "Бизнес-требования: {{business_requirements}}\n\nКонтекст проекта: {{project_context}}",
+          "You are acting as a systems analyst. Based on the business requirements and the project context " +
+          "(existing architecture, documentation), propose a technical solution: " +
+          "affected components, changes to contracts/APIs, risks, and open questions.\n\n" +
+          "Business requirements: {{business_requirements}}\n\nProject context: {{project_context}}",
       },
     ],
   },
   {
     key: "design",
-    name: "Дизайн",
-    description: "Ускоряет подготовку дизайна по фиче.",
+    name: "Design",
+    description: "Speeds up preparing the design for a feature.",
     stageOrder: 3,
     benefitsFromContext: true,
     status: "planned",
@@ -53,8 +53,8 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     key: "autocoding",
-    name: "Написание кода",
-    description: "Пишет код по системному анализу без участия разработчика на этом шаге.",
+    name: "Code Generation",
+    description: "Writes code from the system analysis without a developer's involvement at this step.",
     stageOrder: 4,
     benefitsFromContext: true,
     status: "planned",
@@ -62,25 +62,25 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     key: "code-review",
-    name: "Код-ревью",
-    description: "Проводит код-ревью изменений. Уже есть рабочая реализация — предстоит интеграция.",
+    name: "Code Review",
+    description: "Performs a code review of the changes. A working implementation already exists — integration is pending.",
     stageOrder: 5,
     benefitsFromContext: true,
     status: "planned",
     defaultPrompts: [
       {
-        name: "Базовое код-ревью",
+        name: "Basic code review",
         content:
-          "Проведи код-ревью diff'а ниже. Проверь корректность, безопасность, производительность, " +
-          "граничные случаи и соответствие описанному системному анализу (если он есть в контексте). " +
-          "Дай список замечаний с указанием файла/строки и серьёзности.\n\nDiff: {{diff}}\n\nКонтекст проекта: {{project_context}}",
+          "Perform a code review of the diff below. Check correctness, security, performance, " +
+          "edge cases, and conformance to the described system analysis (if it is present in the context). " +
+          "Provide a list of findings with the file/line and severity.\n\nDiff: {{diff}}\n\nProject context: {{project_context}}",
       },
     ],
   },
   {
     key: "testing",
-    name: "Автотесты",
-    description: "Повышает качество и покрытие автотестами.",
+    name: "Automated Tests",
+    description: "Improves quality and automated test coverage.",
     stageOrder: 6,
     benefitsFromContext: true,
     status: "planned",

@@ -38,14 +38,14 @@ export default async function SettingsPage() {
   return (
       <div className="flex flex-col gap-10 max-w-3xl">
         <div>
-          <h1 className="text-2xl font-semibold">Настройки</h1>
+          <h1 className="text-2xl font-semibold">Settings</h1>
           <p className="mt-1 text-neutral-500">
-            URL-ы сохраняются постоянно. Токены — только на время браузерной сессии, в БД не пишутся.
+            URLs are stored permanently. Tokens live only for the browser session and are never written to the DB.
           </p>
         </div>
 
         <section className="rounded-lg border border-neutral-200 bg-white p-5">
-          <h2 className="text-sm font-medium text-neutral-700 mb-4">GitLab и LLM-провайдер</h2>
+          <h2 className="text-sm font-medium text-neutral-700 mb-4">GitLab and LLM provider</h2>
 
           <form action={saveGeneralSettings} className="flex flex-col gap-4">
             <div className="grid grid-cols-2 gap-4">
@@ -62,13 +62,13 @@ export default async function SettingsPage() {
                 <span className="text-neutral-600">
                   GitLab personal access token{" "}
                   {secrets.hasGitlabToken && (
-                    <span className="text-emerald-600">(введён в этой сессии)</span>
+                    <span className="text-emerald-600">(entered in this session)</span>
                   )}
                 </span>
                 <input
                   type="password"
                   name="gitlabToken"
-                  placeholder={secrets.hasGitlabToken ? "••••••••" : "не задан"}
+                  placeholder={secrets.hasGitlabToken ? "••••••••" : "not set"}
                   className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
                 />
               </label>
@@ -77,7 +77,7 @@ export default async function SettingsPage() {
             <div className="grid grid-cols-2 gap-4">
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-neutral-600">
-                  LLM provider URL <span className="text-neutral-400">(пусто = Anthropic по умолчанию)</span>
+                  LLM provider URL <span className="text-neutral-400">(empty = Anthropic by default)</span>
                 </span>
                 <input
                   name="llmProviderUrl"
@@ -90,13 +90,13 @@ export default async function SettingsPage() {
                 <span className="text-neutral-600">
                   LLM provider token{" "}
                   {secrets.hasLlmProviderToken && (
-                    <span className="text-emerald-600">(введён в этой сессии)</span>
+                    <span className="text-emerald-600">(entered in this session)</span>
                   )}
                 </span>
                 <input
                   type="password"
                   name="llmProviderToken"
-                  placeholder={secrets.hasLlmProviderToken ? "••••••••" : "не задан"}
+                  placeholder={secrets.hasLlmProviderToken ? "••••••••" : "not set"}
                   className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
                 />
               </label>
@@ -107,23 +107,23 @@ export default async function SettingsPage() {
                 type="submit"
                 className="rounded-md bg-neutral-900 px-4 py-1.5 text-sm text-white hover:bg-neutral-700"
               >
-                Сохранить
+                Save
               </button>
               <span className="text-xs text-neutral-400">
-                Пустое поле токена не затирает уже введённый в этой сессии
+                Leaving the token field empty won't overwrite the one already entered this session
               </span>
             </div>
           </form>
 
           <form action={clearSecrets} className="mt-3">
             <button type="submit" className="text-xs text-red-600 hover:underline">
-              Забыть все токены сейчас
+              Forget all tokens now
             </button>
           </form>
         </section>
 
         <section className="rounded-lg border border-neutral-200 bg-white p-5">
-          <h2 className="text-sm font-medium text-neutral-700 mb-4">Модели по инструментам</h2>
+          <h2 className="text-sm font-medium text-neutral-700 mb-4">Models per tool</h2>
           <div className="flex flex-col divide-y divide-neutral-100">
             {TOOLS.map((tool) => {
               const current = settingsByTool.get(tool.key);
@@ -149,14 +149,14 @@ export default async function SettingsPage() {
                   <input
                     name="providerBaseUrl"
                     defaultValue={current?.providerBaseUrl ?? ""}
-                    placeholder="кастомный provider URL (необязательно)"
+                    placeholder="custom provider URL (optional)"
                     className="flex-1 rounded-md border border-neutral-300 px-2 py-1 text-sm"
                   />
                   <button
                     type="submit"
                     className="rounded-md border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-50"
                   >
-                    Сохранить
+                    Save
                   </button>
                 </form>
               );

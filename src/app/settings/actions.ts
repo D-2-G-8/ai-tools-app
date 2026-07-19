@@ -15,7 +15,7 @@ export async function saveGeneralSettings(formData: FormData) {
   const llmProviderUrl = String(formData.get("llmProviderUrl") ?? "").trim();
   const llmProviderToken = String(formData.get("llmProviderToken") ?? "").trim();
 
-  // URL-ы (не секрет) — в БД, персистентно.
+  // URLs (not secret) — stored in the DB, persistently.
   await db
     .update(workspace)
     .set({
@@ -24,8 +24,8 @@ export async function saveGeneralSettings(formData: FormData) {
     })
     .where(eq(workspace.id, workspaceId));
 
-  // Токены — только в сессию. Пустое поле не затирает уже сохранённый токен
-  // (чтобы не приходилось вводить заново при каждом сохранении других полей).
+  // Tokens — session only. An empty field does not overwrite an already-saved token
+  // (so you don't have to re-enter it every time you save other fields).
   const patch: Record<string, string> = {};
   if (gitlabToken) patch.gitlabToken = gitlabToken;
   if (llmProviderToken) patch.llmProviderToken = llmProviderToken;

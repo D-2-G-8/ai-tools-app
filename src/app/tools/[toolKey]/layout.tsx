@@ -14,9 +14,9 @@ export default async function ToolLayout({
   if (!tool) notFound();
 
   const tabs = [
-    { href: `/tools/${toolKey}`, label: "Запуск" },
-    { href: `/tools/${toolKey}/prompts`, label: "Промпты" },
-    { href: `/tools/${toolKey}/stats`, label: "Статистика" },
+    { href: `/tools/${toolKey}`, label: "Run" },
+    { href: `/tools/${toolKey}/prompts`, label: "Prompts" },
+    { href: `/tools/${toolKey}/stats`, label: "Stats" },
   ];
 
   return (

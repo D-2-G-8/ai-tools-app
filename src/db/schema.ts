@@ -13,21 +13,21 @@ import {
 } from "drizzle-orm/pg-core";
 
 /**
- * Схема БД согласно PLAN.md, раздел 4.
+ * DB schema per PLAN.md, section 4.
  *
- * Однопользовательский режим: в MVP `workspace` фактически одна запись,
- * но все таблицы уже привязаны к workspaceId, чтобы позже добавить
- * многопользовательский режим без миграции структуры.
+ * Single-user mode: in the MVP `workspace` is effectively a single row,
+ * but all tables are already tied to workspaceId, so multi-user mode can
+ * be added later without a structural migration.
  *
- * Секретные токены (GitLab PAT, LLM provider token) НИКОГДА не хранятся
- * в этих таблицах — см. src/lib/session.ts.
+ * Secret tokens (GitLab PAT, LLM provider token) are NEVER stored in
+ * these tables — see src/lib/session.ts.
  */
 
 export const workspace = pgTable("workspace", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: varchar("name", { length: 255 }).notNull().default("Default workspace"),
-  // Не секреты — URL-ы можно хранить постоянно. Сами токены живут только
-  // в сессионной cookie (см. src/lib/session.ts), никогда не попадают сюда.
+  // Not secrets — URLs can be stored permanently. The tokens themselves live
+  // only in the session cookie (see src/lib/session.ts), never end up here.
   gitlabUrl: text("gitlab_url"),
   defaultLlmProviderUrl: text("default_llm_provider_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -60,8 +60,8 @@ export const document = pgTable(
   (t) => [index("document_workspace_idx").on(t.workspaceId)],
 );
 
-// Размерность эмбеддинга voyage-3-lite = 512. Если сменится модель эмбеддингов —
-// поменять размерность здесь и пересоздать таблицу/индекс.
+// The voyage-3-lite embedding dimension = 512. If the embedding model changes —
+// update the dimension here and recreate the table/index.
 export const EMBEDDING_DIMENSIONS = 512;
 
 export const documentChunk = pgTable(
@@ -100,7 +100,7 @@ export const toolSettings = pgTable(
       .references(() => workspace.id, { onDelete: "cascade" }),
     toolKey: varchar("tool_key", { length: 64 }).notNull(),
     model: varchar("model", { length: 128 }).notNull(),
-    providerBaseUrl: text("provider_base_url"), // без токена
+    providerBaseUrl: text("provider_base_url"), // without token
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -141,8 +141,8 @@ export const featureWorkflow = pgTable(
   (t) => [index("feature_workflow_workspace_idx").on(t.workspaceId)],
 );
 
-// Практический "граф зависимостей": какие документы использовались как контекст
-// при работе над конкретной фичей.
+// A practical "dependency graph": which documents were used as context
+// while working on a particular feature.
 export const featureWorkflowDocument = pgTable(
   "feature_workflow_document",
   {

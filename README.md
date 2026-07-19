@@ -1,98 +1,100 @@
 # AI Tools Platform
 
-Каркас платформы AI-инструментов согласно `PLAN.md` (архитектура, модель данных, экономика инфраструктуры).
-Однопользовательский режим на старте. На этом этапе поддерживается загрузка/инжест только `.md` документов.
+Scaffold for an AI-tools platform following `PLAN.md` (architecture, data model, infrastructure economics).
+Single-user mode to start. At this stage, only `.md` document upload/ingestion is supported.
 
-## Что уже собрано (v1 каркаса)
+## What's already built (scaffold v1)
 
 - Next.js App Router + TypeScript + Tailwind
-- Drizzle-схема БД с pgvector (`src/db/schema.ts`)
-- Сессионное хранение секретов — GitLab/LLM токены НЕ пишутся в БД (`src/lib/session.ts`)
-- Загрузка `.md` → Vercel Blob → парсинг заголовков/frontmatter → чанкование → эмбеддинги (Voyage AI) → pgvector
-- Настройки: GitLab URL/токен, LLM provider URL/токен, модель на каждый инструмент
-- Вкладки "Промпты" (дефолты + свои) и "Статистика" (факт по прогонам + оценка по прайсу) на каждый инструмент
-- История: незавершённые фичи + лог прогонов
-- Универсальный раннер инструмента (промпт + ввод + опциональный RAG-контекст → Claude через Vercel AI SDK)
-- Реестр из 6 инструментов (`src/lib/tools/registry.ts`) — пока с заглушками промптов, кроме код-ревью и бизнес-требований
+- Drizzle DB schema with pgvector (`src/db/schema.ts`)
+- Session-based secret storage — GitLab/LLM tokens are NOT written to the DB (`src/lib/session.ts`)
+- Upload `.md` → Vercel Blob → parse headings/frontmatter → chunking → embeddings (Voyage AI) → pgvector
+- Settings: GitLab URL/token, LLM provider URL/token, per-tool model
+- "Prompts" (defaults + custom) and "Stats" (actuals per run + estimate based on pricing) tabs for each tool
+- History: unfinished features + run log
+- Universal tool runner (prompt + input + optional RAG context → Claude via the Vercel AI SDK)
+- Registry of 6 tools (`src/lib/tools/registry.ts`) — prompts are still stubbed for all but code review and business requirements
 
-## Локальный запуск
+## Running locally
 
 ```bash
 pnpm install
-cp .env.example .env.local   # и заполнить переменные, см. ниже
-pnpm db:push                 # создать таблицы по schema.ts
-pnpm db:setup                # включить pgvector + создать дефолтный workspace
+cp .env.example .env.local   # and fill in the variables, see below
+pnpm db:migrate              # pgvector + migrations + default workspace (idempotent)
 pnpm dev
 ```
 
-Открыть http://localhost:3000
+You change the schema in `src/db/schema.ts`, then `pnpm db:generate` creates a new migration in
+`./drizzle` — which needs to be committed. `pnpm db:migrate` applies any pending migrations
+(on Vercel this happens automatically during the `build` step).
 
-## Переменные окружения
+Open http://localhost:3000
 
-См. `.env.example`. Кратко:
+## Environment variables
 
-| Переменная      | Откуда взять                                                                                                               | Секрет?                                                                                                            |
+See `.env.example`. In short:
+
+| Variable      | Where to get it                                                                                                               | Secret?                                                                                                            |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `POSTGRES_URL`          | Neon (через Vercel Marketplace или neon.tech напрямую)                                                                | да, но это инфраструктурный ключ платформы, не токен пользователя |
-| `BLOB_READ_WRITE_TOKEN` | Vercel Dashboard → Storage → Blob                                                                                                   | да, аналогично                                                                                               |
-| `SESSION_SECRET`        | `openssl rand -base64 32`                                                                                                           | да, обязательно свой на каждое окружение                                               |
-| `ANTHROPIC_API_KEY`     | console.anthropic.com (опционально, для личного использования без ввода токена в UI) | да                                                                                                                     |
-| `VOYAGE_API_KEY`        | voyageai.com (эмбеддинги, т.к. у Claude нет своего embeddings API)                                              | да                                                                                                                     |
+| `POSTGRES_URL`          | Neon (via Vercel Marketplace or neon.tech directly)                                                                | yes, but this is a platform infrastructure key, not a user token |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Dashboard → Storage → Blob                                                                                                   | yes, same as above                                                                                               |
+| `SESSION_SECRET`        | `openssl rand -base64 32`                                                                                                           | yes, use a unique one per environment                                               |
+| `ANTHROPIC_API_KEY`     | console.anthropic.com (optional, for personal use without entering a token in the UI) | yes                                                                                                                     |
+| `VOYAGE_API_KEY`        | voyageai.com (embeddings, since Claude has no embeddings API of its own)                                              | yes                                                                                                                     |
 
-GitLab токен и LLM provider токен пользователь вводит через UI (`/settings`) — они хранятся только в
-зашифрованной cookie на время браузерной сессии и нигде не персистятся.
+The user enters the GitLab token and LLM provider token through the UI (`/settings`) — they are stored only in
+an encrypted cookie for the duration of the browser session and are never persisted anywhere.
 
-## Деплой на Vercel
+## Deploying to Vercel
 
-1. Запушить репозиторий в GitHub/GitLab и импортировать в Vercel ("Add New Project").
-2. Storage → подключить **Neon Postgres** (Marketplace) — переменная `POSTGRES_URL` (или `DATABASE_URL`)
-   проставится автоматически.
-3. Storage → подключить **Blob** — `BLOB_READ_WRITE_TOKEN` проставится автоматически.
-4. Project Settings → Environment Variables: добавить `SESSION_SECRET`, `VOYAGE_API_KEY`, опционально
+1. Push the repository to GitHub/GitLab and import it into Vercel ("Add New Project").
+2. Storage → connect **Neon Postgres** (Marketplace) — the `POSTGRES_URL` (or `DATABASE_URL`) variable
+   is set automatically.
+3. Storage → connect **Blob** — `BLOB_READ_WRITE_TOKEN` is set automatically.
+4. Project Settings → Environment Variables: add `SESSION_SECRET`, `VOYAGE_API_KEY`, and optionally
    `ANTHROPIC_API_KEY`.
-5. После первого деплоя прогнать миграции и инициализацию БД одним из способов:
-   - локально, указав `POSTGRES_URL` от продакшен-базы во временном `.env.local`: `pnpm db:push && pnpm db:setup`;
-   - либо через Vercel CLI / встроенный терминал, если настроен.
-6. Открыть задеплоенный домен → `/settings` → ввести LLM provider token (или задать `ANTHROPIC_API_KEY`
-   в окружении) и, если нужно, GitLab URL/токен.
+5. Migrations run automatically during the `build` step (`tsx src/db/scripts/migrate.ts && next build`),
+   including the pgvector extension and creation of the default workspace — nothing needs to be run by hand.
+6. Open the deployed domain → `/settings` → enter your LLM provider token (or set `ANTHROPIC_API_KEY`
+   in the environment) and, if needed, the GitLab URL/token.
 
-Ориентировочная стоимость инфраструктуры при лёгкой однопользовательской нагрузке — см. `PLAN.md`, раздел 11
-(коротко: ~$20/мес база + переменные расходы на LLM-вызовы, обычно $30–60/мес суммарно).
+For a rough infrastructure cost estimate under light single-user load, see `PLAN.md`, section 11
+(in short: ~$20/mo baseline + variable LLM-call costs, typically $30–60/mo total).
 
-## Известные ограничения этой версии (что уточнять дальше)
+## Known limitations of this version (things to revisit)
 
-- **Загрузка файлов синхронная** — инжест (парсинг/чанкование/эмбеддинги) выполняется прямо в Server
-  Action сразу после аплоада. Для больших пачек документов стоит вынести в фоновую задачу (Inngest/Trigger.dev,
-  см. PLAN.md раздел 2) — на объёме нескольких `.md` файлов это не критично.
-- **Загрузка через Server Action** ограничена стандартным лимитом тела запроса Vercel Functions (~4.5 МБ).
-  Для больших файлов переходить на клиентскую загрузку (`@vercel/blob` client upload).
-  Здесь принято ограничение только `.md`, для которых это на практике не проблема.
-- **Подстановка плейсхолдеров в промптах упрощённая** — раннер сейчас просто склеивает промпт + ввод
-  пользователя + найденный контекст, без парсинга `{{переменных}}` из текста промпта. Полноценный
-  шаблонизатор стоит сделать, когда будем прорабатывать конкретные инструменты отдельно (см. PLAN.md
-  раздел 8, фаза 4).
-- **Код-ревью инструмент — заглушка.** Реестр (`src/lib/tools/registry.ts`) резервирует для него место,
-  реальная интеграция существующей тулзы — следующий шаг после каркаса.
-- **Однопользовательский режим** — весь каркас работает через один дефолтный `workspace`, без логина.
-  Схема БД уже привязана к `workspaceId`, так что добавление авторизации (Clerk/Auth.js) не потребует
-  переделки таблиц.
+- **File upload is synchronous** — ingestion (parsing/chunking/embeddings) runs right inside the Server
+  Action immediately after upload. For large batches of documents it should be moved to a background job (Inngest/Trigger.dev,
+  see PLAN.md section 2) — for a handful of `.md` files it isn't a problem.
+- **Uploads via Server Action** are limited by the standard Vercel Functions request body limit (~4.5 MB).
+  For large files, switch to client-side upload (`@vercel/blob` client upload).
+  Here we've deliberately restricted uploads to `.md`, for which this isn't a problem in practice.
+- **Placeholder substitution in prompts is simplistic** — the runner currently just concatenates the prompt +
+  user input + retrieved context, without parsing `{{variables}}` out of the prompt text. A proper
+  templating engine is worth building when we work through the individual tools separately (see PLAN.md
+  section 8, phase 4).
+- **The code-review tool is a stub.** The registry (`src/lib/tools/registry.ts`) reserves a slot for it;
+  the actual integration of the existing tool is the next step after the scaffold.
+- **Single-user mode** — the entire scaffold runs through a single default `workspace`, without login.
+  The DB schema is already tied to `workspaceId`, so adding authentication (Clerk/Auth.js) won't require
+  reworking the tables.
 
-## Структура проекта
+## Project structure
 
 ```
 src/
-  db/               Drizzle-схема, клиент БД, скрипт первичной настройки
+  db/               Drizzle schema, DB client, initial setup script
   lib/
-    session.ts      Секреты пользователя (cookie, не БД)
-    models.ts       Каталог моделей и цен
-    llm/client.ts   Anthropic-клиент (Vercel AI SDK)
-    ingest/         Парсинг/чанкование .md, эмбеддинги, пайплайн инжеста
-    tools/          Реестр инструментов, общий контракт, дефолтные промпты
+    session.ts      User secrets (cookie, not DB)
+    models.ts       Model and pricing catalog
+    llm/client.ts   Anthropic client (Vercel AI SDK)
+    ingest/         .md parsing/chunking, embeddings, ingestion pipeline
+    tools/          Tool registry, shared contract, default prompts
   app/
-    settings/       Настройки (GitLab/LLM, модели по инструментам)
-    documents/       Загрузка и статус документов
-    history/         Незавершённые фичи + лог прогонов
-    tools/[toolKey]/ Раннер, вкладки "Промпты" и "Статистика" на инструмент
+    settings/       Settings (GitLab/LLM, per-tool models)
+    documents/       Document upload and status
+    history/         Unfinished features + run log
+    tools/[toolKey]/ Runner, "Prompts" and "Stats" tabs per tool
 ```
 
-Полный план и обоснование архитектурных решений — в `PLAN.md`.
+The full plan and rationale for the architectural decisions is in `PLAN.md`.

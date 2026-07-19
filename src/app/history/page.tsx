@@ -45,16 +45,16 @@ export default async function HistoryPage() {
   return (
       <div className="flex flex-col gap-8 max-w-4xl">
         <div>
-          <h1 className="text-2xl font-semibold">История</h1>
+          <h1 className="text-2xl font-semibold">History</h1>
           <p className="mt-1 text-neutral-500">
-            Фичи в работе (можно продолжить с той стадии, где остановились) и лог прогонов инструментов.
+            Features in progress (you can pick up from the stage where you left off) and a log of tool runs.
           </p>
         </div>
 
         <section>
-          <h2 className="text-sm font-medium text-neutral-600 mb-2">Фичи</h2>
+          <h2 className="text-sm font-medium text-neutral-600 mb-2">Features</h2>
           {features.length === 0 ? (
-            <p className="text-sm text-neutral-400">Пока ни одной фичи не начато.</p>
+            <p className="text-sm text-neutral-400">No features started yet.</p>
           ) : (
             <ul className="flex flex-col gap-2">
               {features.map((f) => {
@@ -65,7 +65,7 @@ export default async function HistoryPage() {
                       <div>
                         <div className="font-medium">{f.name}</div>
                         <div className="text-xs text-neutral-400">
-                          статус: {f.status} · стадия: {stageTool?.name ?? f.currentStage}
+                          status: {f.status} · stage: {stageTool?.name ?? f.currentStage}
                         </div>
                       </div>
                       {stageTool && (
@@ -73,7 +73,7 @@ export default async function HistoryPage() {
                           href={`/tools/${stageTool.key}?feature=${f.id}`}
                           className="rounded-md border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-50"
                         >
-                          Продолжить
+                          Continue
                         </Link>
                       )}
                     </div>
@@ -85,18 +85,18 @@ export default async function HistoryPage() {
         </section>
 
         <section>
-          <h2 className="text-sm font-medium text-neutral-600 mb-2">Прогоны инструментов (последние 50)</h2>
+          <h2 className="text-sm font-medium text-neutral-600 mb-2">Tool runs (last 50)</h2>
           {runs.length === 0 ? (
-            <p className="text-sm text-neutral-400">Прогонов ещё не было.</p>
+            <p className="text-sm text-neutral-400">No runs yet.</p>
           ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-neutral-200 text-left text-neutral-500">
-                  <th className="py-2 font-medium">Инструмент</th>
-                  <th className="py-2 font-medium">Модель</th>
-                  <th className="py-2 font-medium">Токены</th>
-                  <th className="py-2 font-medium">Стоимость</th>
-                  <th className="py-2 font-medium">Статус</th>
+                  <th className="py-2 font-medium">Tool</th>
+                  <th className="py-2 font-medium">Model</th>
+                  <th className="py-2 font-medium">Tokens</th>
+                  <th className="py-2 font-medium">Cost</th>
+                  <th className="py-2 font-medium">Status</th>
                 </tr>
               </thead>
               <tbody>

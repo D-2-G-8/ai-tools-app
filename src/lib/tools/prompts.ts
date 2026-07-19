@@ -5,9 +5,9 @@ import { getDefaultWorkspaceId } from "@/db/workspace";
 import { getTool } from "./registry";
 
 /**
- * Дефолтные промпты из реестра инструментов сохраняются в БД при первом
- * обращении к вкладке "Промпты" конкретного инструмента — дальше это
- * обычные редактируемые записи prompt_template.
+ * The default prompts from the tool registry are saved to the DB on the first
+ * visit to a specific tool's "Prompts" tab — after that they are ordinary
+ * editable prompt_template records.
  */
 export async function ensureDefaultPrompts(toolKey: string) {
   const workspaceId = await getDefaultWorkspaceId();

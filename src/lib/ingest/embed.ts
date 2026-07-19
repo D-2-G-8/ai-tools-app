@@ -1,13 +1,13 @@
 import { EMBEDDING_DIMENSIONS } from "@/db/schema";
 
 /**
- * У Claude нет собственного embeddings API — Anthropic рекомендует Voyage AI
- * (см. PLAN.md, раздел 11). Используем voyage-3-lite (512 измерений, дёшево:
- * $0.06 / 1M токенов) — для .md документов этого достаточно с запасом.
+ * Claude has no embeddings API of its own — Anthropic recommends Voyage AI
+ * (see PLAN.md, section 11). We use voyage-3-lite (512 dimensions, cheap:
+ * $0.06 / 1M tokens) — more than enough for .md documents.
  *
- * Ключ VOYAGE_API_KEY — серверная переменная окружения платформы (это не
- * личный токен пользователя из настроек, а ключ самого приложения для
- * инфраструктурной функции инжеста).
+ * The VOYAGE_API_KEY is a server-side environment variable of the platform (it
+ * is not the user's personal token from settings, but the application's own key
+ * for the infrastructural ingest function).
  */
 const VOYAGE_MODEL = "voyage-3-lite";
 const VOYAGE_URL = "https://api.voyageai.com/v1/embeddings";
@@ -18,12 +18,12 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
   const apiKey = process.env.VOYAGE_API_KEY;
   if (!apiKey) {
     throw new Error(
-      "VOYAGE_API_KEY не задан. Это отдельный ключ платформы для эмбеддингов (не токен пользователя) — " +
-        "получить на https://www.voyageai.com и добавить в переменные окружения.",
+      "VOYAGE_API_KEY is not set. This is a separate platform key for embeddings (not a user token) — " +
+        "get one at https://www.voyageai.com and add it to the environment variables.",
     );
   }
 
-  // Voyage принимает до 128 текстов за раз — батчим на всякий случай.
+  // Voyage accepts up to 128 texts at a time — batch just in case.
   const BATCH = 128;
   const result: number[][] = [];
 
@@ -44,7 +44,7 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`Voyage embeddings API вернул ошибку ${res.status}: ${text}`);
+      throw new Error(`Voyage embeddings API returned error ${res.status}: ${text}`);
     }
 
     const json = (await res.json()) as { data: { embedding: number[]; index: number }[] };

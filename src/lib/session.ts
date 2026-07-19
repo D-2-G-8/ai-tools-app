@@ -3,12 +3,12 @@ import { cookies } from "next/headers";
 import { getIronSession, type SessionOptions } from "iron-session";
 
 /**
- * Секреты пользователя (GitLab PAT, токен LLM-провайдера) хранятся ТОЛЬКО
- * здесь — в зашифрованной httpOnly cookie на время браузерной сессии.
- * Они никогда не попадают в БД (см. PLAN.md, раздел 3).
+ * User secrets (GitLab PAT, LLM provider token) are stored ONLY here — in an
+ * encrypted httpOnly cookie for the duration of the browser session. They
+ * never reach the DB (see PLAN.md, section 3).
  *
- * URL-ы без токенов (GitLab URL, provider base URL) можно спокойно хранить
- * в БД (tool_settings) — секретом является только сам токен.
+ * URLs without tokens (GitLab URL, provider base URL) can safely be stored in
+ * the DB (tool_settings) — only the token itself is a secret.
  */
 export interface SessionData {
   gitlabUrl?: string;
@@ -21,8 +21,8 @@ function getSessionSecret(): string {
   const secret = process.env.SESSION_SECRET;
   if (!secret || secret.length < 32) {
     throw new Error(
-      "SESSION_SECRET не задан или короче 32 символов. Сгенерируй, например: `openssl rand -base64 32`, " +
-        "и добавь как переменную окружения (в Vercel и в .env.local для локальной разработки).",
+      "SESSION_SECRET is not set or shorter than 32 characters. Generate one, for example: `openssl rand -base64 32`, " +
+        "and add it as an environment variable (in Vercel and in .env.local for local development).",
     );
   }
   return secret;
@@ -37,8 +37,8 @@ const sessionOptions: SessionOptions = {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    // Намеренно НЕ ставим maxAge — cookie сессионная и живёт до закрытия
-    // браузера / явного логаута, токены нигде не персистятся.
+    // Intentionally do NOT set maxAge — the cookie is a session cookie and
+    // lives until the browser is closed / explicit logout; tokens are never persisted.
   },
 };
 
@@ -47,14 +47,14 @@ export async function getSession() {
   return getIronSession<SessionData>(cookieStore, sessionOptions);
 }
 
-/** Частично обновить секреты в сессии (например, из формы настроек). */
+/** Partially update the secrets in the session (for example, from the settings form). */
 export async function updateSessionSecrets(patch: Partial<SessionData>) {
   const session = await getSession();
   Object.assign(session, patch);
   await session.save();
 }
 
-/** Очистить все секреты (кнопка "забыть токены" в настройках). */
+/** Clear all secrets (the "forget tokens" button in settings). */
 export async function clearSessionSecrets() {
   const session = await getSession();
   session.gitlabUrl = undefined;
@@ -64,7 +64,7 @@ export async function clearSessionSecrets() {
   await session.save();
 }
 
-/** Есть ли уже введённые секреты — для отображения статуса в UI без раскрытия значений. */
+/** Whether secrets have already been entered — to show status in the UI without revealing the values. */
 export async function getSecretsStatus() {
   const session = await getSession();
   return {
