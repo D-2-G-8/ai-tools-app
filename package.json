@@ -17,6 +17,7 @@
     "@ai-sdk/anthropic": "^4.0.16",
     "@vercel/blob": "^2.6.1",
     "ai": "^7.0.31",
+    "bpmn-js": "^18.21.0",
     "drizzle-orm": "^0.45.2",
     "gray-matter": "^4.0.3",
     "iron-session": "^8.0.4",

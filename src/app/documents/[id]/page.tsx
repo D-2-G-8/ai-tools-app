@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { loadDocumentForWorkspace, loadDocumentContent, statusLabel, statusClass } from "../shared";
+import { splitMarkdownFences } from "@/lib/markdown/split-fences";
+import { BpmnDiagram } from "@/components/bpmn-diagram";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +16,10 @@ export default async function DocumentViewPage({
   if (!doc) notFound();
 
   const { content, error: contentError } = await loadDocumentContent(doc.blobUrl);
+  // ```bpmn fenced blocks (see business-requirements-template.ts) are stored
+  // as plain text like everything else, but rendered here as diagrams --
+  // split them out so only those segments get the BpmnDiagram treatment.
+  const segments = content !== undefined ? splitMarkdownFences(content) : null;
 
   return (
     <div className="flex flex-col gap-6 max-w-4xl">
@@ -49,15 +55,25 @@ export default async function DocumentViewPage({
         </div>
       </div>
 
-      <section className="rounded-lg border border-neutral-200 bg-white p-5">
-        {contentError ? (
+      {contentError ? (
+        <section className="rounded-lg border border-neutral-200 bg-white p-5">
           <p className="text-sm text-red-600">Couldn&apos;t load the file content: {contentError}</p>
-        ) : (
-          <pre className="whitespace-pre-wrap break-words font-mono text-sm text-neutral-800">
-            {content}
-          </pre>
-        )}
-      </section>
+        </section>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {segments!.map((segment, i) =>
+            segment.type === "bpmn" ? (
+              <BpmnDiagram key={i} xml={segment.content} />
+            ) : segment.content.trim() ? (
+              <section key={i} className="rounded-lg border border-neutral-200 bg-white p-5">
+                <pre className="whitespace-pre-wrap break-words font-mono text-sm text-neutral-800">
+                  {segment.content}
+                </pre>
+              </section>
+            ) : null
+          )}
+        </div>
+      )}
     </div>
   );
 }

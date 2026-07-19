@@ -43,8 +43,56 @@ Proactively ask about the following even if the user never brings it up (don't s
   1.3.4. Success metrics — up to 3 metrics
 1.4. Business process
   1.4.1. Business logic, every scenario — both successful and unsuccessful. In the final document, render this as
-         a Mermaid diagram (\`\`\`mermaid ... \`\`\` block) — for this MVP that's the closest approximation to BPMN —
-         plus a text description of the steps and branches.
+         a real BPMN 2.0 XML diagram (\`\`\`bpmn ... \`\`\` block containing one full
+         \`<?xml version="1.0" ...?><bpmn:definitions ...>...</bpmn:definitions>\` document — not Mermaid, not
+         pseudo-code) plus a text description of the steps and branches. The document viewer renders \`\`\`bpmn
+         blocks as an actual diagram image, so the XML must be complete and renderable, not just illustrative:
+         - use standard BPMN elements — \`startEvent\`, \`endEvent\`, \`task\` (or \`userTask\`/\`serviceTask\` where
+           it's clearly one or the other), \`exclusiveGateway\` for branching — connected with \`sequenceFlow\`,
+           with a \`name\` on every conditional \`sequenceFlow\` leaving a gateway (e.g. "valid" / "invalid");
+         - include a \`<bpmndi:BPMNDiagram>\` section with real layout (\`BPMNShape\`/\`BPMNEdge\` with
+           \`bounds\`/\`waypoint\`) so the process actually renders instead of just validating;
+         - keep each diagram small and readable (roughly 5-15 elements covering one flow's happy + unhappy paths);
+           if the feature has clearly separate sub-flows, use two or three separate \`\`\`bpmn blocks (each with its
+           own short intro sentence) instead of one large diagram.
+         Minimal shape to follow (adapt ids/names/count of elements to the actual process, this is only a skeleton):
+         \`\`\`bpmn
+         <?xml version="1.0" encoding="UTF-8"?>
+         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+             xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+             xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+             id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn">
+           <bpmn:process id="Process_1" isExecutable="false">
+             <bpmn:startEvent id="StartEvent_1" name="..." />
+             <bpmn:task id="Task_1" name="..." />
+             <bpmn:endEvent id="EndEvent_1" name="..." />
+             <bpmn:sequenceFlow id="Flow_1" sourceRef="StartEvent_1" targetRef="Task_1" />
+             <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_1" targetRef="EndEvent_1" />
+           </bpmn:process>
+           <bpmndi:BPMNDiagram id="Diagram_1">
+             <bpmndi:BPMNPlane id="Plane_1" bpmnElement="Process_1">
+               <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
+                 <dc:Bounds x="152" y="102" width="36" height="36" />
+               </bpmndi:BPMNShape>
+               <bpmndi:BPMNShape id="Task_1_di" bpmnElement="Task_1">
+                 <dc:Bounds x="240" y="80" width="100" height="80" />
+               </bpmndi:BPMNShape>
+               <bpmndi:BPMNShape id="EndEvent_1_di" bpmnElement="EndEvent_1">
+                 <dc:Bounds x="392" y="102" width="36" height="36" />
+               </bpmndi:BPMNShape>
+               <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+                 <di:waypoint x="188" y="120" />
+                 <di:waypoint x="240" y="120" />
+               </bpmndi:BPMNEdge>
+               <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+                 <di:waypoint x="340" y="120" />
+                 <di:waypoint x="392" y="120" />
+               </bpmndi:BPMNEdge>
+             </bpmndi:BPMNPlane>
+           </bpmndi:BPMNDiagram>
+         </bpmn:definitions>
+         \`\`\`
 1.5. Business rules for error handling (what is shown to the user)
 1.6. Description of functions and fields
   1.6.1. Function -> Description
