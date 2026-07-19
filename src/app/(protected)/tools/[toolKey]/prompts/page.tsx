@@ -49,32 +49,39 @@ export default async function ToolPromptsPage({
           )}
           {prompts.map((p) => (
             <div key={p.id} className="rounded-lg border border-neutral-200 bg-white p-4">
+              {/*
+                The "set active" control is deliberately kept OUTSIDE the
+                update form below rather than nested inside it. HTML forbids
+                a form element inside another form element -- browsers
+                silently mis-parse that, which desyncs React's tracked form
+                elements from the real DOM and made "Set active" submit
+                unreliably (or not at all) instead of triggering
+                setActivePrompt.
+              */}
+              <div className="mb-2 flex items-center justify-end gap-2">
+                {p.isDefault && (
+                  <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-500">
+                    default
+                  </span>
+                )}
+                {p.isActive ? (
+                  <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700">
+                    active
+                  </span>
+                ) : (
+                  <form action={setActivePrompt.bind(null, toolKey, p.id)}>
+                    <button type="submit" className="text-xs text-neutral-500 hover:underline">
+                      Set active
+                    </button>
+                  </form>
+                )}
+              </div>
               <form action={updatePrompt.bind(null, toolKey, p.id)} className="flex flex-col gap-2">
-                <div className="flex items-center justify-between gap-2">
-                  <input
-                    name="name"
-                    defaultValue={p.name}
-                    className="flex-1 rounded-md border border-neutral-300 px-2 py-1 text-sm font-medium"
-                  />
-                  <div className="flex shrink-0 items-center gap-2">
-                    {p.isDefault && (
-                      <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-500">
-                        default
-                      </span>
-                    )}
-                    {p.isActive ? (
-                      <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700">
-                        active
-                      </span>
-                    ) : (
-                      <form action={setActivePrompt.bind(null, toolKey, p.id)}>
-                        <button type="submit" className="text-xs text-neutral-500 hover:underline">
-                          Set active
-                        </button>
-                      </form>
-                    )}
-                  </div>
-                </div>
+                <input
+                  name="name"
+                  defaultValue={p.name}
+                  className="w-full rounded-md border border-neutral-300 px-2 py-1 text-sm font-medium"
+                />
                 <textarea
                   name="content"
                   defaultValue={p.content}
