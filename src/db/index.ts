@@ -39,8 +39,26 @@ function getDb(): DB {
   return global.__dbInstance;
 }
 
+/**
+ * The proxy's own target is a bare `{}`, not a real `PostgresJsDatabase` --
+ * so besides `get`, we also need `getPrototypeOf` (and `has`, for
+ * completeness) to forward to the real, lazily-created instance. Without
+ * this, code that duck-types the object instead of just reading properties
+ * off it breaks. Concretely: @auth/drizzle-adapter's `DrizzleAdapter(db,
+ * ...)` calls drizzle-orm's `is(db, PgDatabase)`, which starts with
+ * `db instanceof PgDatabase` -- and `instanceof` walks the prototype chain
+ * via `[[GetPrototypeOf]]`, which on a plain `get`-only proxy resolves to
+ * `Object.prototype` (the empty target's prototype), not the real
+ * `PgDatabase` prototype, making every such check silently fail.
+ */
 export const db: DB = new Proxy({} as DB, {
   get(_target, prop, receiver) {
     return Reflect.get(getDb() as object, prop, receiver);
+  },
+  has(_target, prop) {
+    return Reflect.has(getDb() as object, prop);
+  },
+  getPrototypeOf() {
+    return Reflect.getPrototypeOf(getDb() as object);
   },
 });
