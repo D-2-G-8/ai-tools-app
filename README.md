@@ -1,36 +1,98 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Tools Platform
 
-## Getting Started
+Каркас платформы AI-инструментов согласно `PLAN.md` (архитектура, модель данных, экономика инфраструктуры).
+Однопользовательский режим на старте. На этом этапе поддерживается загрузка/инжест только `.md` документов.
 
-First, run the development server:
+## Что уже собрано (v1 каркаса)
+
+- Next.js App Router + TypeScript + Tailwind
+- Drizzle-схема БД с pgvector (`src/db/schema.ts`)
+- Сессионное хранение секретов — GitLab/LLM токены НЕ пишутся в БД (`src/lib/session.ts`)
+- Загрузка `.md` → Vercel Blob → парсинг заголовков/frontmatter → чанкование → эмбеддинги (Voyage AI) → pgvector
+- Настройки: GitLab URL/токен, LLM provider URL/токен, модель на каждый инструмент
+- Вкладки "Промпты" (дефолты + свои) и "Статистика" (факт по прогонам + оценка по прайсу) на каждый инструмент
+- История: незавершённые фичи + лог прогонов
+- Универсальный раннер инструмента (промпт + ввод + опциональный RAG-контекст → Claude через Vercel AI SDK)
+- Реестр из 6 инструментов (`src/lib/tools/registry.ts`) — пока с заглушками промптов, кроме код-ревью и бизнес-требований
+
+## Локальный запуск
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
+cp .env.example .env.local   # и заполнить переменные, см. ниже
+pnpm db:push                 # создать таблицы по schema.ts
+pnpm db:setup                # включить pgvector + создать дефолтный workspace
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Открыть http://localhost:3000
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Переменные окружения
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+См. `.env.example`. Кратко:
 
-## Learn More
+| Переменная | Откуда взять | Секрет? |
+|---|---|---|
+| `POSTGRES_URL` | Neon (через Vercel Marketplace или neon.tech напрямую) | да, но это инфраструктурный ключ платформы, не токен пользователя |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Dashboard → Storage → Blob | да, аналогично |
+| `SESSION_SECRET` | `openssl rand -base64 32` | да, обязательно свой на каждое окружение |
+| `ANTHROPIC_API_KEY` | console.anthropic.com (опционально, для личного использования без ввода токена в UI) | да |
+| `VOYAGE_API_KEY` | voyageai.com (эмбеддинги, т.к. у Claude нет своего embeddings API) | да |
 
-To learn more about Next.js, take a look at the following resources:
+GitLab токен и LLM provider токен пользователь вводит через UI (`/settings`) — они хранятся только в
+зашифрованной cookie на время браузерной сессии и нигде не персистятся.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Деплой на Vercel
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Запушить репозиторий в GitHub/GitLab и импортировать в Vercel ("Add New Project").
+2. Storage → подключить **Neon Postgres** (Marketplace) — переменная `POSTGRES_URL` (или `DATABASE_URL`)
+   проставится автоматически.
+3. Storage → подключить **Blob** — `BLOB_READ_WRITE_TOKEN` проставится автоматически.
+4. Project Settings → Environment Variables: добавить `SESSION_SECRET`, `VOYAGE_API_KEY`, опционально
+   `ANTHROPIC_API_KEY`.
+5. После первого деплоя прогнать миграции и инициализацию БД одним из способов:
+   - локально, указав `POSTGRES_URL` от продакшен-базы во временном `.env.local`: `pnpm db:push && pnpm db:setup`;
+   - либо через Vercel CLI / встроенный терминал, если настроен.
+6. Открыть задеплоенный домен → `/settings` → ввести LLM provider token (или задать `ANTHROPIC_API_KEY`
+   в окружении) и, если нужно, GitLab URL/токен.
 
-## Deploy on Vercel
+Ориентировочная стоимость инфраструктуры при лёгкой однопользовательской нагрузке — см. `PLAN.md`, раздел 11
+(коротко: ~$20/мес база + переменные расходы на LLM-вызовы, обычно $30–60/мес суммарно).
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Известные ограничения этой версии (что уточнять дальше)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Загрузка файлов синхронная** — инжест (парсинг/чанкование/эмбеддинги) выполняется прямо в Server
+  Action сразу после аплоада. Для больших пачек документов стоит вынести в фоновую задачу (Inngest/Trigger.dev,
+  см. PLAN.md раздел 2) — на объёме нескольких `.md` файлов это не критично.
+- **Загрузка через Server Action** ограничена стандартным лимитом тела запроса Vercel Functions (~4.5 МБ).
+  Для больших файлов переходить на клиентскую загрузку (`@vercel/blob` client upload).
+  Здесь принято ограничение только `.md`, для которых это на практике не проблема.
+- **Подстановка плейсхолдеров в промптах упрощённая** — раннер сейчас просто склеивает промпт + ввод
+  пользователя + найденный контекст, без парсинга `{{переменных}}` из текста промпта. Полноценный
+  шаблонизатор стоит сделать, когда будем прорабатывать конкретные инструменты отдельно (см. PLAN.md
+  раздел 8, фаза 4).
+- **Код-ревью инструмент — заглушка.** Реестр (`src/lib/tools/registry.ts`) резервирует для него место,
+  реальная интеграция существующей тулзы — следующий шаг после каркаса.
+- **Однопользовательский режим** — весь каркас работает через один дефолтный `workspace`, без логина.
+  Схема БД уже привязана к `workspaceId`, так что добавление авторизации (Clerk/Auth.js) не потребует
+  переделки таблиц.
+
+## Структура проекта
+
+```
+src/
+  db/               Drizzle-схема, клиент БД, скрипт первичной настройки
+  lib/
+    session.ts      Секреты пользователя (cookie, не БД)
+    models.ts       Каталог моделей и цен
+    llm/client.ts   Anthropic-клиент (Vercel AI SDK)
+    ingest/         Парсинг/чанкование .md, эмбеддинги, пайплайн инжеста
+    tools/          Реестр инструментов, общий контракт, дефолтные промпты
+  app/
+    settings/       Настройки (GitLab/LLM, модели по инструментам)
+    documents/       Загрузка и статус документов
+    history/         Незавершённые фичи + лог прогонов
+    tools/[toolKey]/ Раннер, вкладки "Промпты" и "Статистика" на инструмент
+```
+
+Полный план и обоснование архитектурных решений — в `PLAN.md`.
