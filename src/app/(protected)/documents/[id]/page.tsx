@@ -7,6 +7,7 @@ import { loadDocumentForWorkspace, loadDocumentContent, statusLabel, statusClass
 import { splitMarkdownFences } from "@/lib/markdown/split-fences";
 import { BpmnDiagram } from "@/components/bpmn-diagram";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
+import { MarkdownContent } from "@/components/markdown-content";
 
 export const dynamic = "force-dynamic";
 
@@ -100,9 +101,7 @@ export default async function DocumentViewPage({
               </section>
             ) : segment.content.trim() ? (
               <section key={i} className="rounded-lg border border-neutral-200 bg-white p-5">
-                <pre className="whitespace-pre-wrap break-words font-mono text-sm text-neutral-800">
-                  {segment.content}
-                </pre>
+                <MarkdownContent content={segment.content} />
               </section>
             ) : null
           )}
