@@ -50,9 +50,15 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
   const onlineCount = companyMembers.filter((m) => isOnline(m.lastSeenAt)).length;
 
   return (
-    <div className="min-h-screen flex bg-neutral-50 text-neutral-900 font-sans">
+    // h-screen (a fixed viewport height, not min-h-screen's floor) + overflow-hidden
+    // turns this into an app shell: the OUTER page never scrolls itself, so the
+    // sidebar's height always equals the screen, independent of how tall the
+    // main content is. aside and main each get their own overflow-y-auto so a
+    // long document scrolls on its own without dragging the sidebar's nav out
+    // of view with it.
+    <div className="flex h-screen overflow-hidden bg-neutral-50 text-neutral-900 font-sans">
       <PresenceHeartbeat />
-      <aside className="w-64 shrink-0 border-r border-neutral-200 bg-white p-4 flex flex-col gap-6">
+      <aside className="w-64 shrink-0 overflow-y-auto border-r border-neutral-200 bg-white p-4 flex flex-col gap-6">
         <div className="text-lg font-semibold px-2">AI Tools Platform</div>
         <nav className="flex flex-col gap-1">
           {navItems.map((item) => (
@@ -99,7 +105,7 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
           </form>
         </div>
       </aside>
-      <main className="flex-1 min-w-0 p-8">{children}</main>
+      <main className="flex-1 min-w-0 overflow-y-auto p-8">{children}</main>
     </div>
   );
 }
