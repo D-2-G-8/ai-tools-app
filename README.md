@@ -108,9 +108,13 @@ For a rough infrastructure cost estimate under light single-user load, see `PLAN
 - **The pre-auth default workspace is adopted exactly once** — whichever company is created first after this
   shipped keeps all documents/settings that existed before auth; every company created after that starts
   with an empty workspace. See "Authentication setup" above.
-- **No presence or edit-locking yet** — `/company` shows a static member roster (who's in the company, and
-  each document's creator/last editor), not who's online right now, and two people can still overwrite each
-  other's edits to the same document. Planned as a later phase.
+- **Presence and edit-locking are best-effort, not real-time push** — "online now" (`/company`, and the
+  sidebar's "N online" badge) is based on a `lastSeenAt` timestamp refreshed on page loads and a ~60s
+  client-side heartbeat, with a ~3 minute freshness window, so it can lag a little rather than update
+  instantly. Document edit locks (`src/db/edit-lock.ts`) work the same way: only one person can have a
+  document's edit page open at a time, with a clear "X is currently editing this" message for anyone else who
+  tries — the lock is released on save/cancel, or auto-expires ~3 minutes after the last heartbeat if a tab
+  crashes or is force-closed, so a document can never get stuck locked forever.
 - **Per-user model settings and usage stats are not split out yet** — `/settings` and the per-tool "Stats" tab
   are still workspace-wide (i.e. company-wide), not per-user. Planned as a later phase.
 - **Embedded-image captioning is best-effort and uncached** — up to 10 images per document are described
@@ -127,20 +131,23 @@ src/
   db/               Drizzle schema, DB client, initial setup script
     users.ts        getCurrentUser() -- fresh DB read of the signed-in user's row
     workspace.ts     getCurrentWorkspaceId() -- resolves the signed-in user's company's workspace
+    edit-lock.ts     Per-document edit lock (acquire/renew/release, TTL-based expiry)
   lib/
     session.ts      User secrets (cookie, not DB)
     models.ts       Model and pricing catalog
     llm/client.ts   Anthropic client (Vercel AI SDK)
     ingest/         .md parsing/chunking, embeddings, image captioning, ingestion pipeline
     tools/          Tool registry, shared contract, default prompts
+    presence.ts     "Online now" freshness window + isOnline() helper
   app/
     sign-in/        Google sign-in page
     onboarding/     Create/join a company (after first sign-in)
     api/auth/[...nextauth]/ Auth.js route handler
     (protected)/    Everything below requires a signed-in user in a company -- see layout.tsx
-      company/      Member roster + owner-only email invites
+      presence-actions.ts  touchPresence() -- refreshes the signed-in user's lastSeenAt
+      company/      Member roster (with online/last-seen) + owner-only email invites
       settings/     Settings (GitLab/LLM, per-tool models)
-      documents/    Document upload and status
+      documents/    Document upload/status, and per-document edit locking (see [id]/edit/)
       history/      Unfinished features + run log
       tools/[toolKey]/ Runner, "Prompts" and "Stats" tabs per tool
 ```

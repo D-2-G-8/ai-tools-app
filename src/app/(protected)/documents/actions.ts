@@ -8,6 +8,7 @@ import { document } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { getCurrentUser } from "@/db/users";
+import { releaseEditLockIfOwned } from "@/db/edit-lock";
 import { ingestMarkdownDocument } from "@/lib/ingest/pipeline";
 
 /**
@@ -126,6 +127,13 @@ export async function updateDocumentContent(documentId: string, formData: FormDa
         updatedByUserId: currentUser?.id,
       })
       .where(eq(document.id, documentId));
+
+    // Saving is the authoritative "I'm done editing" signal -- release the
+    // lock right away instead of waiting for it to expire (see
+    // src/db/edit-lock.ts). Also covered by EditLockHeartbeat's unmount
+    // cleanup once this redirects away, so this is a bit belt-and-suspenders,
+    // but it means the lock clears immediately even if that cleanup is slow.
+    await releaseEditLockIfOwned(documentId);
 
     await del(previousBlobUrl).catch(() => {});
 

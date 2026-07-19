@@ -1,9 +1,15 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { user as userTable } from "@/db/schema";
 import { getCurrentUser } from "@/db/users";
 import { signOut } from "@/auth";
 import { TOOLS } from "@/lib/tools/registry";
+import { isOnline } from "@/lib/presence";
+import { touchPresence } from "./presence-actions";
+import { PresenceHeartbeat } from "@/components/presence-heartbeat";
 
 /**
  * Access control for every page under this route group lives here, not in
@@ -34,14 +40,34 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
     redirect("/onboarding");
   }
 
+  // Best-effort -- see presence-actions.ts, this never throws.
+  await touchPresence();
+
+  const companyMembers = await db
+    .select({ lastSeenAt: userTable.lastSeenAt })
+    .from(userTable)
+    .where(eq(userTable.companyId, user.companyId));
+  const onlineCount = companyMembers.filter((m) => isOnline(m.lastSeenAt)).length;
+
   return (
     <div className="min-h-full flex bg-neutral-50 text-neutral-900 font-sans">
+      <PresenceHeartbeat />
       <aside className="w-64 shrink-0 border-r border-neutral-200 bg-white p-4 flex flex-col gap-6">
         <div className="text-lg font-semibold px-2">AI Tools Platform</div>
         <nav className="flex flex-col gap-1">
           {navItems.map((item) => (
-            <Link key={item.href} href={item.href} className="rounded-md px-2 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100">
-              {item.label}
+            <Link
+              key={item.href}
+              href={item.href}
+              className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100"
+            >
+              <span>{item.label}</span>
+              {item.href === "/company" && onlineCount > 0 && (
+                <span className="flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  {onlineCount} online
+                </span>
+              )}
             </Link>
           ))}
         </nav>

@@ -2,6 +2,8 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { company, companyInvite, user } from "@/db/schema";
 import { getCurrentUser } from "@/db/users";
+import { isOnline } from "@/lib/presence";
+import { formatRelativeTime } from "@/lib/format-relative-time";
 import { inviteMember, revokeInvite } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -41,23 +43,36 @@ export default async function CompanyPage() {
       </div>
 
       <section className="rounded-lg border border-neutral-200 bg-white p-5">
-        <h2 className="text-sm font-medium text-neutral-700 mb-4">Members ({members.length})</h2>
+        <h2 className="text-sm font-medium text-neutral-700 mb-4">
+          Members ({members.length})
+          {" · "}
+          {members.filter((m) => isOnline(m.lastSeenAt)).length} online now
+        </h2>
         <ul className="flex flex-col gap-2">
-          {members.map((m) => (
-            <li
-              key={m.id}
-              className="flex items-center justify-between rounded-md border border-neutral-100 p-3 text-sm"
-            >
-              <div className="min-w-0">
-                <div className="font-medium truncate">{m.name ?? m.email}</div>
-                <div className="text-xs text-neutral-400 truncate">{m.email}</div>
-              </div>
-              <div className="flex shrink-0 items-center gap-3 text-xs text-neutral-500">
-                <span className="rounded bg-neutral-100 px-1.5 py-0.5">{m.companyRole}</span>
-                <span>joined {m.createdAt.toLocaleDateString()}</span>
-              </div>
-            </li>
-          ))}
+          {members.map((m) => {
+            const online = isOnline(m.lastSeenAt);
+            return (
+              <li
+                key={m.id}
+                className="flex items-center justify-between rounded-md border border-neutral-100 p-3 text-sm"
+              >
+                <div className="min-w-0">
+                  <div className="font-medium truncate">{m.name ?? m.email}</div>
+                  <div className="text-xs text-neutral-400 truncate">{m.email}</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-3 text-xs text-neutral-500">
+                  <span
+                    className={`flex items-center gap-1 ${online ? "text-emerald-600" : "text-neutral-400"}`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${online ? "bg-emerald-500" : "bg-neutral-300"}`} />
+                    {online ? "online" : m.lastSeenAt ? `last seen ${formatRelativeTime(m.lastSeenAt)}` : "never signed in"}
+                  </span>
+                  <span className="rounded bg-neutral-100 px-1.5 py-0.5">{m.companyRole}</span>
+                  <span>joined {m.createdAt.toLocaleDateString()}</span>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       </section>
 

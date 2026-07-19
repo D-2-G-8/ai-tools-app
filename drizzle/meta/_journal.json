@@ -29,6 +29,13 @@
       "when": 1784491144235,
       "tag": "0003_add_auth_and_companies",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784492405699,
+      "tag": "0004_add_presence_and_edit_lock",
+      "breakpoints": true
     }
   ]
 }

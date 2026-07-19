@@ -61,6 +61,11 @@ export const user = pgTable("user", {
   // see src/app/onboarding.
   companyId: uuid("company_id").references((): AnyPgColumn => company.id, { onDelete: "set null" }),
   companyRole: varchar("company_role", { length: 16 }), // "owner" | "member", null until in a company
+  // Bumped by touchPresence() (src/app/(protected)/presence-actions.ts) on
+  // page loads / a client-side heartbeat while a protected page is open --
+  // see src/lib/format-relative-time.ts / the company page for how "online"
+  // is derived (within a short freshness window) from this.
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -189,6 +194,12 @@ export const document = pgTable(
     // removed (onDelete: set null) rather than the document disappearing.
     createdByUserId: uuid("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
     updatedByUserId: uuid("updated_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    // Soft, TTL-based edit lock (see src/db/edit-lock.ts) -- set while
+    // someone has the edit page open, cleared on save/cancel, and treated
+    // as expired (ignored) after EDIT_LOCK_TTL_MS regardless, so a crashed
+    // tab or closed browser can never lock a document forever.
+    editLockedByUserId: uuid("edit_locked_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    editLockedAt: timestamp("edit_locked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
