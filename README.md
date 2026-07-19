@@ -10,11 +10,18 @@ uploaded documents and project context. At this stage, only `.md` document uploa
 - Drizzle DB schema with pgvector (`src/db/schema.ts`)
 - Session-based secret storage — GitLab/LLM tokens are NOT written to the DB (`src/lib/session.ts`)
 - Upload `.md` → Vercel Blob → parse headings/frontmatter → chunking → embeddings (Voyage AI) → pgvector
-- Settings: GitLab URL/token, LLM provider URL/token, per-tool model
+- Settings: GitLab URL/token/project IDs (for AI Review), LLM provider URL/token, per-tool model
 - "Prompts" (defaults + custom) and "Stats" (actuals per run + estimate based on pricing) tabs for each tool
 - History: unfinished features + run log
 - Universal tool runner (prompt + input + optional RAG context → Claude via the Vercel AI SDK)
-- Registry of 6 tools (`src/lib/tools/registry.ts`) — prompts are still stubbed for all but code review and business requirements
+- **AI Review**: live code review of open GitLab merge requests (`src/lib/code-review/`, `src/lib/gitlab/client.ts`) —
+  V1 (single cheap model), V2 (two independent models + a judge that reconciles findings, flagging
+  agreed-but-unconfirmed ones as "needs verification" instead of dropping them), V3 (multi-agent — context-aware
+  + context-blind "fresh eyes" + security/performance specialists — manual-trigger-only, with a cost estimate
+  shown before you run it)
+- Registry of 6 tools (`src/lib/tools/registry.ts`) — Business Requirements and AI Review (code review) are fully
+  built with their own UI; the rest (System Analysis, Design, Code Generation, Automated Tests) are stubs with
+  placeholder prompts, awaiting their own implementation
 
 ## Running locally
 
@@ -100,8 +107,12 @@ For a rough infrastructure cost estimate under light single-user load, see `PLAN
   user input + retrieved context, without parsing `{{variables}}` out of the prompt text. A proper
   templating engine is worth building when we work through the individual tools separately (see PLAN.md
   section 8, phase 4).
-- **The code-review tool is a stub.** The registry (`src/lib/tools/registry.ts`) reserves a slot for it;
-  the actual integration of the existing tool is the next step after the scaffold.
+- **AI Review depends on GitLab being reachable from Vercel's serverless functions.** A self-hosted GitLab
+  instance that's only reachable over a VPN or internal network won't work — Vercel's functions run outside
+  that network and the request will simply fail (see `describeGitlabError` in `src/lib/gitlab/client.ts` for
+  the error message you'd see). Diffs are truncated at ~100K characters (not all changes get analyzed on very
+  large MRs), and V3's "full context" is limited to whichever documents you explicitly select per review, not
+  auto-detected.
 - **No invite emails are sent** — inviting a teammate from `/company` just records the invite; the owner
   has to tell them out-of-band, and the invite only activates once they sign in with Google using that exact
   email address.
@@ -141,6 +152,8 @@ src/
     ingest/         .md parsing/chunking, embeddings, image captioning, ingestion pipeline
     tools/          Tool registry, shared contract, default prompts, per-user model resolution
     presence.ts     "Online now" freshness window + isOnline() helper
+    gitlab/client.ts    Plain-fetch GitLab REST v4 client (list MRs, fetch diff, post comment)
+    code-review/    AI Review engines -- prompts, v1/v2/v3 review logic, MR-comment formatting
   app/
     sign-in/        Google sign-in page
     onboarding/     Create/join a company (after first sign-in)
@@ -151,7 +164,8 @@ src/
       settings/     Settings -- GitLab/LLM (company-wide), model per tool (personal to you)
       documents/    Document upload/status, and per-document edit locking (see [id]/edit/)
       history/      Unfinished features + run log
-      tools/[toolKey]/ Runner, "Prompts" tab, and "Stats" tab (your usage + company total) per tool
+      tools/[toolKey]/ Runner, "Prompts" tab, and "Stats" tab per tool -- code-review-actions.ts +
+                        code-review-panel.tsx special-case AI Review's own UI instead of the generic runner
 ```
 
 The full plan and rationale for the architectural decisions is in `PLAN.md`.
