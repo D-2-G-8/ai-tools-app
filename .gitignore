@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# scratch files moved here for manual deletion (device_bash can't delete directly)
+/_to_delete
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

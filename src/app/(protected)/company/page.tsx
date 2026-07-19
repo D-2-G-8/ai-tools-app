@@ -10,6 +10,7 @@ import { inviteMember, revokeInvite } from "./actions";
 
 function toolDisplayName(toolKey: string): string {
   if (toolKey === "documents-qa") return "Documents Q&A";
+  if (toolKey === "document-format") return "Document formatting";
   return getTool(toolKey)?.name ?? toolKey;
 }
 

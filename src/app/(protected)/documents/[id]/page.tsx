@@ -5,9 +5,8 @@ import { db } from "@/db";
 import { user } from "@/db/schema";
 import { loadDocumentForWorkspace, loadDocumentContent, statusLabel, statusClass } from "../shared";
 import { splitMarkdownFences } from "@/lib/markdown/split-fences";
-import { BpmnDiagram } from "@/components/bpmn-diagram";
-import { MermaidDiagram } from "@/components/mermaid-diagram";
-import { MarkdownContent } from "@/components/markdown-content";
+import { DocumentSegments } from "@/components/document-segments";
+import { DocumentFormatButton } from "@/components/document-format-button";
 
 export const dynamic = "force-dynamic";
 
@@ -63,7 +62,7 @@ export default async function DocumentViewPage({
         {doc.status === "error" && doc.errorMessage && (
           <p className="mt-1 text-sm text-red-600">{doc.errorMessage}</p>
         )}
-        <div className="mt-1 flex items-center gap-3 text-xs text-neutral-400">
+        <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-neutral-400">
           <Link href={`/documents/${doc.id}/edit`} className="hover:underline">
             Edit
           </Link>
@@ -76,36 +75,14 @@ export default async function DocumentViewPage({
         </div>
       </div>
 
+      {!contentError && <DocumentFormatButton documentId={doc.id} />}
+
       {contentError ? (
         <section className="rounded-lg border border-neutral-200 bg-white p-5">
           <p className="text-sm text-red-600">Couldn&apos;t load the file content: {contentError}</p>
         </section>
       ) : (
-        <div className="flex flex-col gap-4">
-          {segments!.map((segment, i) =>
-            segment.type === "bpmn" ? (
-              <BpmnDiagram key={i} xml={segment.content} />
-            ) : segment.type === "mermaid" ? (
-              <MermaidDiagram key={i} definition={segment.content} />
-            ) : segment.type === "image" ? (
-              <section key={i} className="rounded-lg border border-neutral-200 bg-white p-4">
-                {/* eslint-disable-next-line @next/next/no-img-element -- image
-                    sources here are arbitrary Blob URLs / data URIs supplied
-                    at runtime, not static assets next/image can optimize. */}
-                <img
-                  src={segment.src}
-                  alt={segment.alt || "Embedded image"}
-                  className="max-w-full rounded"
-                />
-                {segment.alt && <p className="mt-2 text-xs text-neutral-400">{segment.alt}</p>}
-              </section>
-            ) : segment.content.trim() ? (
-              <section key={i} className="rounded-lg border border-neutral-200 bg-white p-5">
-                <MarkdownContent content={segment.content} />
-              </section>
-            ) : null
-          )}
-        </div>
+        <DocumentSegments segments={segments!} />
       )}
     </div>
   );
