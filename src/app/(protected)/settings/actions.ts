@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { workspace, toolSettings } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
+import { getCurrentUser } from "@/db/users";
 import { updateSessionSecrets, clearSessionSecrets } from "@/lib/session";
 
 export async function saveGeneralSettings(formData: FormData) {
@@ -43,8 +44,18 @@ export async function clearSecrets() {
   revalidatePath("/settings");
 }
 
+/**
+ * Saves the SIGNED-IN USER's own model choice for a tool -- see
+ * src/lib/tools/model-settings.ts. Always reads/writes the row keyed by
+ * (workspaceId, toolKey, userId=them); it never touches the legacy
+ * company-wide row (userId IS NULL), so saving your own preference can
+ * never change what a teammate who hasn't set one yet still falls back to.
+ */
 export async function saveToolModel(toolKey: string, formData: FormData) {
   const workspaceId = await getCurrentWorkspaceId();
+  const currentUser = await getCurrentUser();
+  if (!currentUser) return;
+
   const model = String(formData.get("model") ?? "").trim();
   const providerBaseUrl = String(formData.get("providerBaseUrl") ?? "").trim();
 
@@ -53,7 +64,13 @@ export async function saveToolModel(toolKey: string, formData: FormData) {
   const existing = await db
     .select()
     .from(toolSettings)
-    .where(and(eq(toolSettings.workspaceId, workspaceId), eq(toolSettings.toolKey, toolKey)))
+    .where(
+      and(
+        eq(toolSettings.workspaceId, workspaceId),
+        eq(toolSettings.toolKey, toolKey),
+        eq(toolSettings.userId, currentUser.id),
+      ),
+    )
     .limit(1);
 
   if (existing.length > 0) {
@@ -65,6 +82,7 @@ export async function saveToolModel(toolKey: string, formData: FormData) {
     await db.insert(toolSettings).values({
       workspaceId,
       toolKey,
+      userId: currentUser.id,
       model,
       providerBaseUrl: providerBaseUrl || null,
     });

@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { run } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
+import { getCurrentUser } from "@/db/users";
 import { getTool } from "@/lib/tools/registry";
 import { AVAILABLE_MODELS, estimateCostUsd } from "@/lib/models";
 import { SetupNotice } from "@/components/setup-notice";
@@ -26,68 +27,95 @@ export default async function ToolStatsPage({
     totalCostUsd: number;
     avgCostUsd: number;
   };
+  const statsSelect = {
+    model: run.model,
+    runs: sql<number>`count(*)`.mapWith(Number),
+    avgInputTokens: sql<number>`round(avg(${run.inputTokens}))`.mapWith(Number),
+    avgOutputTokens: sql<number>`round(avg(${run.outputTokens}))`.mapWith(Number),
+    totalCostUsd: sql<number>`coalesce(sum(${run.costEstimateUsd}), 0)`.mapWith(Number),
+    avgCostUsd: sql<number>`coalesce(avg(${run.costEstimateUsd}), 0)`.mapWith(Number),
+  };
   let byModel: StatsRow[] | null = null;
+  let myByModel: StatsRow[] | null = null;
   let loadError: unknown = null;
   try {
     const workspaceId = await getCurrentWorkspaceId();
+    const currentUser = await getCurrentUser();
 
     byModel = await db
-      .select({
-        model: run.model,
-        runs: sql<number>`count(*)`.mapWith(Number),
-        avgInputTokens: sql<number>`round(avg(${run.inputTokens}))`.mapWith(Number),
-        avgOutputTokens: sql<number>`round(avg(${run.outputTokens}))`.mapWith(Number),
-        totalCostUsd: sql<number>`coalesce(sum(${run.costEstimateUsd}), 0)`.mapWith(Number),
-        avgCostUsd: sql<number>`coalesce(avg(${run.costEstimateUsd}), 0)`.mapWith(Number),
-      })
+      .select(statsSelect)
       .from(run)
       .where(and(eq(run.workspaceId, workspaceId), eq(run.toolKey, toolKey)))
       .groupBy(run.model);
+
+    myByModel = currentUser
+      ? await db
+          .select(statsSelect)
+          .from(run)
+          .where(and(eq(run.workspaceId, workspaceId), eq(run.toolKey, toolKey), eq(run.userId, currentUser.id)))
+          .groupBy(run.model)
+      : [];
   } catch (err) {
     loadError = err;
   }
 
-  if (loadError || !byModel) {
+  if (loadError || !byModel || !myByModel) {
     return <SetupNotice error={loadError} />;
   }
 
   const hasHistory = byModel.length > 0;
+  const hasMyHistory = myByModel.length > 0;
+
+  function renderStatsTable(rows: StatsRow[]) {
+    return (
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-neutral-200 text-left text-neutral-500">
+            <th className="py-2 font-medium">Model</th>
+            <th className="py-2 font-medium">Runs</th>
+            <th className="py-2 font-medium">Avg in/out tokens</th>
+            <th className="py-2 font-medium">Avg cost</th>
+            <th className="py-2 font-medium">Total spent</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.model} className="border-b border-neutral-100">
+              <td className="py-2">{row.model}</td>
+              <td className="py-2">{row.runs}</td>
+              <td className="py-2">
+                {row.avgInputTokens} / {row.avgOutputTokens}
+              </td>
+              <td className="py-2">${row.avgCostUsd.toFixed(4)}</td>
+              <td className="py-2">${row.totalCostUsd.toFixed(4)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
 
   return (
       <div className="flex flex-col gap-8">
         <section>
-          <h2 className="text-sm font-medium text-neutral-600 mb-2">
-            Actual run statistics
-          </h2>
+          <h2 className="text-sm font-medium text-neutral-600 mb-2">Your usage</h2>
+          {!hasMyHistory ? (
+            <p className="text-sm text-neutral-400">
+              No runs of your own yet — data will appear after your first run of this tool.
+            </p>
+          ) : (
+            renderStatsTable(myByModel)
+          )}
+        </section>
+
+        <section>
+          <h2 className="text-sm font-medium text-neutral-600 mb-2">Company total</h2>
           {!hasHistory ? (
             <p className="text-sm text-neutral-400">
               No runs yet — data will appear after the first run of this tool.
             </p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-neutral-200 text-left text-neutral-500">
-                  <th className="py-2 font-medium">Model</th>
-                  <th className="py-2 font-medium">Runs</th>
-                  <th className="py-2 font-medium">Avg in/out tokens</th>
-                  <th className="py-2 font-medium">Avg cost</th>
-                  <th className="py-2 font-medium">Total spent</th>
-                </tr>
-              </thead>
-              <tbody>
-                {byModel.map((row) => (
-                  <tr key={row.model} className="border-b border-neutral-100">
-                    <td className="py-2">{row.model}</td>
-                    <td className="py-2">{row.runs}</td>
-                    <td className="py-2">
-                      {row.avgInputTokens} / {row.avgOutputTokens}
-                    </td>
-                    <td className="py-2">${row.avgCostUsd.toFixed(4)}</td>
-                    <td className="py-2">${row.totalCostUsd.toFixed(4)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            renderStatsTable(byModel)
           )}
         </section>
 

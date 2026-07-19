@@ -1,7 +1,8 @@
 import { db } from "@/db";
 import { toolSettings, workspace } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
+import { getCurrentUser } from "@/db/users";
 import { getSecretsStatus } from "@/lib/session";
 import { AVAILABLE_MODELS, DEFAULT_MODEL_ID } from "@/lib/models";
 import { TOOLS } from "@/lib/tools/registry";
@@ -12,12 +13,31 @@ export const dynamic = "force-dynamic";
 
 async function loadSettingsData() {
   const workspaceId = await getCurrentWorkspaceId();
+  const currentUser = await getCurrentUser();
 
   const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
   const secrets = await getSecretsStatus();
-  const perToolSettings = await db.select().from(toolSettings).where(eq(toolSettings.workspaceId, workspaceId));
 
-  return { ws, secrets, settingsByTool: new Map(perToolSettings.map((s) => [s.toolKey, s])) };
+  // Model settings are per-user (see src/lib/tools/model-settings.ts) --
+  // fetch the signed-in user's own rows plus any legacy company-wide row
+  // (userId IS NULL) to fall back to as the pre-filled default when they
+  // haven't picked a model of their own yet.
+  const rows = currentUser
+    ? await db
+        .select()
+        .from(toolSettings)
+        .where(
+          and(
+            eq(toolSettings.workspaceId, workspaceId),
+            or(eq(toolSettings.userId, currentUser.id), isNull(toolSettings.userId)),
+          ),
+        )
+    : [];
+
+  const personalByTool = new Map(rows.filter((r) => r.userId === currentUser?.id).map((s) => [s.toolKey, s]));
+  const legacyByTool = new Map(rows.filter((r) => r.userId === null).map((s) => [s.toolKey, s]));
+
+  return { ws, secrets, personalByTool, legacyByTool };
 }
 
 export default async function SettingsPage() {
@@ -33,7 +53,7 @@ export default async function SettingsPage() {
     return <SetupNotice error={loadError} />;
   }
 
-  const { ws, secrets, settingsByTool } = data;
+  const { ws, secrets, personalByTool, legacyByTool } = data;
 
   return (
       <div className="flex flex-col gap-10 max-w-3xl">
@@ -123,10 +143,15 @@ export default async function SettingsPage() {
         </section>
 
         <section className="rounded-lg border border-neutral-200 bg-white p-5">
-          <h2 className="text-sm font-medium text-neutral-700 mb-4">Models per tool</h2>
+          <h2 className="text-sm font-medium text-neutral-700 mb-1">Your models per tool</h2>
+          <p className="mb-4 text-xs text-neutral-400">
+            Personal to you — each teammate can pick their own model per tool. Until you save one, a tool falls
+            back to the company&apos;s previously-set default (if any), then to {DEFAULT_MODEL_ID}.
+          </p>
           <div className="flex flex-col divide-y divide-neutral-100">
             {TOOLS.map((tool) => {
-              const current = settingsByTool.get(tool.key);
+              const personal = personalByTool.get(tool.key);
+              const legacy = legacyByTool.get(tool.key);
               const saveWithKey = saveToolModel.bind(null, tool.key);
               return (
                 <form
@@ -137,7 +162,7 @@ export default async function SettingsPage() {
                   <div className="w-48 shrink-0 text-sm font-medium">{tool.name}</div>
                   <select
                     name="model"
-                    defaultValue={current?.model ?? DEFAULT_MODEL_ID}
+                    defaultValue={personal?.model ?? legacy?.model ?? DEFAULT_MODEL_ID}
                     className="rounded-md border border-neutral-300 px-2 py-1 text-sm"
                   >
                     {AVAILABLE_MODELS.map((m) => (
@@ -148,7 +173,7 @@ export default async function SettingsPage() {
                   </select>
                   <input
                     name="providerBaseUrl"
-                    defaultValue={current?.providerBaseUrl ?? ""}
+                    defaultValue={personal?.providerBaseUrl ?? legacy?.providerBaseUrl ?? ""}
                     placeholder="custom provider URL (optional)"
                     className="flex-1 rounded-md border border-neutral-300 px-2 py-1 text-sm"
                   />

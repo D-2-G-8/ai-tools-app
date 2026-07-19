@@ -245,12 +245,19 @@ export const toolSettings = pgTable(
       .notNull()
       .references(() => workspace.id, { onDelete: "cascade" }),
     toolKey: varchar("tool_key", { length: 64 }).notNull(),
+    // Nullable -- NULL rows predate per-user model settings and are treated
+    // as the company-wide fallback for anyone who hasn't picked their own
+    // model yet (see src/lib/tools/model-settings.ts, getEffectiveModel()).
+    // Every row written by the current Settings page has this set; the app
+    // never creates a new NULL row, so there is at most one legacy row per
+    // (workspaceId, toolKey).
+    userId: uuid("user_id").references(() => user.id, { onDelete: "cascade" }),
     model: varchar("model", { length: 128 }).notNull(),
     providerBaseUrl: text("provider_base_url"), // without token
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("tool_settings_workspace_tool_idx").on(t.workspaceId, t.toolKey)],
+  (t) => [uniqueIndex("tool_settings_workspace_tool_user_idx").on(t.workspaceId, t.toolKey, t.userId)],
 );
 
 export const promptTemplate = pgTable(
@@ -322,6 +329,12 @@ export const run = pgTable(
       onDelete: "set null",
     }),
     model: varchar("model", { length: 128 }).notNull(),
+    // Nullable -- runs created before this shipped have no recorded user,
+    // and it goes null if that user's account is ever removed (onDelete:
+    // set null) rather than the run (and its cost history) disappearing.
+    // Powers "your usage" on the tool Stats tab and the by-member breakdown
+    // on the Company page.
+    userId: uuid("user_id").references(() => user.id, { onDelete: "set null" }),
     usedProjectContext: boolean("used_project_context").notNull().default(false),
     status: varchar("status", { length: 32 }).notNull().default("completed"), // running | completed | error
     inputSummary: text("input_summary"),

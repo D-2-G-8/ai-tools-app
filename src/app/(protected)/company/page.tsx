@@ -1,10 +1,17 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { company, companyInvite, user } from "@/db/schema";
+import { company, companyInvite, run, user } from "@/db/schema";
 import { getCurrentUser } from "@/db/users";
+import { getCurrentWorkspaceId } from "@/db/workspace";
 import { isOnline } from "@/lib/presence";
 import { formatRelativeTime } from "@/lib/format-relative-time";
+import { getTool } from "@/lib/tools/registry";
 import { inviteMember, revokeInvite } from "./actions";
+
+function toolDisplayName(toolKey: string): string {
+  if (toolKey === "documents-qa") return "Documents Q&A";
+  return getTool(toolKey)?.name ?? toolKey;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +39,34 @@ export default async function CompanyPage() {
     .orderBy(companyInvite.createdAt);
 
   const isOwner = currentUser.companyRole === "owner";
+
+  // Company-wide token/cost usage -- "sколько потратили токенов и какие
+  // модели использовались и где" (which models, and where -- i.e. which
+  // tool). Every run across every member of this company, broken down two
+  // ways: by tool + model, and by member.
+  const workspaceId = await getCurrentWorkspaceId();
+  const usageStatsSelect = {
+    runs: sql<number>`count(*)`.mapWith(Number),
+    inputTokens: sql<number>`coalesce(sum(${run.inputTokens}), 0)`.mapWith(Number),
+    outputTokens: sql<number>`coalesce(sum(${run.outputTokens}), 0)`.mapWith(Number),
+    costUsd: sql<number>`coalesce(sum(${run.costEstimateUsd}), 0)`.mapWith(Number),
+  };
+  const usageByToolModel = await db
+    .select({ toolKey: run.toolKey, model: run.model, ...usageStatsSelect })
+    .from(run)
+    .where(eq(run.workspaceId, workspaceId))
+    .groupBy(run.toolKey, run.model)
+    .orderBy(sql`sum(${run.costEstimateUsd}) desc`);
+  const usageByMember = await db
+    .select({ userId: run.userId, ...usageStatsSelect })
+    .from(run)
+    .where(eq(run.workspaceId, workspaceId))
+    .groupBy(run.userId)
+    .orderBy(sql`sum(${run.costEstimateUsd}) desc`);
+
+  const memberById = new Map(members.map((m) => [m.id, m]));
+  const totalCostUsd = usageByToolModel.reduce((sum, r) => sum + r.costUsd, 0);
+  const totalRuns = usageByToolModel.reduce((sum, r) => sum + r.runs, 0);
 
   return (
     <div className="flex flex-col gap-8 max-w-3xl">
@@ -74,6 +109,83 @@ export default async function CompanyPage() {
             );
           })}
         </ul>
+      </section>
+
+      <section className="rounded-lg border border-neutral-200 bg-white p-5">
+        <h2 className="text-sm font-medium text-neutral-700 mb-1">Usage</h2>
+        <p className="mb-4 text-xs text-neutral-400">
+          Token/cost totals across every member of this company, from LLM calls made by any tool (see each
+          tool&apos;s own &quot;Stats&quot; tab for just your own usage on that tool).
+        </p>
+
+        {totalRuns === 0 ? (
+          <p className="text-sm text-neutral-400">No runs yet — data will appear after the first tool run.</p>
+        ) : (
+          <div className="flex flex-col gap-6">
+            <p className="text-sm text-neutral-600">
+              <span className="font-medium">${totalCostUsd.toFixed(4)}</span> spent across{" "}
+              <span className="font-medium">{totalRuns}</span> runs, company-wide.
+            </p>
+
+            <div>
+              <h3 className="text-xs font-medium uppercase tracking-wide text-neutral-400 mb-2">By tool and model</h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-neutral-200 text-left text-neutral-500">
+                    <th className="py-2 font-medium">Tool</th>
+                    <th className="py-2 font-medium">Model</th>
+                    <th className="py-2 font-medium">Runs</th>
+                    <th className="py-2 font-medium">Tokens (in/out)</th>
+                    <th className="py-2 font-medium">Spent</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usageByToolModel.map((row) => (
+                    <tr key={`${row.toolKey}-${row.model}`} className="border-b border-neutral-100">
+                      <td className="py-2">{toolDisplayName(row.toolKey)}</td>
+                      <td className="py-2">{row.model}</td>
+                      <td className="py-2">{row.runs}</td>
+                      <td className="py-2">
+                        {row.inputTokens} / {row.outputTokens}
+                      </td>
+                      <td className="py-2">${row.costUsd.toFixed(4)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-medium uppercase tracking-wide text-neutral-400 mb-2">By member</h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-neutral-200 text-left text-neutral-500">
+                    <th className="py-2 font-medium">Member</th>
+                    <th className="py-2 font-medium">Runs</th>
+                    <th className="py-2 font-medium">Tokens (in/out)</th>
+                    <th className="py-2 font-medium">Spent</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usageByMember.map((row) => {
+                    const member = row.userId ? memberById.get(row.userId) : undefined;
+                    const label = member?.name ?? member?.email ?? "Before per-user tracking / removed member";
+                    return (
+                      <tr key={row.userId ?? "unknown"} className="border-b border-neutral-100">
+                        <td className="py-2">{label}</td>
+                        <td className="py-2">{row.runs}</td>
+                        <td className="py-2">
+                          {row.inputTokens} / {row.outputTokens}
+                        </td>
+                        <td className="py-2">${row.costUsd.toFixed(4)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </section>
 
       {isOwner && (

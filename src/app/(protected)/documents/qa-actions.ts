@@ -4,6 +4,7 @@ import { generateText } from "ai";
 import { db } from "@/db";
 import { run as runTable } from "@/db/schema";
 import { getCurrentWorkspaceId } from "@/db/workspace";
+import { getCurrentUser } from "@/db/users";
 import { getAnthropicClient } from "@/lib/llm/client";
 import { DEFAULT_MODEL_ID, estimateCostUsd } from "@/lib/models";
 import { embedTexts } from "@/lib/ingest/embed";
@@ -40,6 +41,7 @@ export async function askDocumentsQuestion(
   if (!question) return { error: "Enter a question" };
 
   const workspaceId = await getCurrentWorkspaceId();
+  const currentUser = await getCurrentUser();
 
   type ChunkRow = { headingPath: string | null; content: string; documentFilename: string };
   let rows: ChunkRow[];
@@ -75,6 +77,7 @@ export async function askDocumentsQuestion(
       workspaceId,
       toolKey: "documents-qa",
       model: DEFAULT_MODEL_ID,
+      userId: currentUser?.id,
       usedProjectContext: true,
       status: "completed",
       inputSummary: question.slice(0, 500),
@@ -97,6 +100,7 @@ export async function askDocumentsQuestion(
       workspaceId,
       toolKey: "documents-qa",
       model: DEFAULT_MODEL_ID,
+      userId: currentUser?.id,
       usedProjectContext: true,
       status: "error",
       inputSummary: question.slice(0, 500),

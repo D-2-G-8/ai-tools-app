@@ -2,12 +2,14 @@
 
 import { generateText } from "ai";
 import { db } from "@/db";
-import { promptTemplate, toolSettings, run as runTable } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { promptTemplate, run as runTable } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
+import { getCurrentUser } from "@/db/users";
 import { getTool } from "@/lib/tools/registry";
+import { getEffectiveModel } from "@/lib/tools/model-settings";
 import { getAnthropicClient } from "@/lib/llm/client";
-import { DEFAULT_MODEL_ID, estimateCostUsd } from "@/lib/models";
+import { estimateCostUsd } from "@/lib/models";
 import { embedTexts } from "@/lib/ingest/embed";
 import { searchRelevantChunks } from "@/lib/ingest/pipeline";
 
@@ -37,13 +39,8 @@ export async function runTool(toolKey: string, _prevState: RunState, formData: F
   if (!userInput) return { error: "Fill in the input before running" };
 
   const workspaceId = await getCurrentWorkspaceId();
-
-  const [settings] = await db
-    .select()
-    .from(toolSettings)
-    .where(and(eq(toolSettings.workspaceId, workspaceId), eq(toolSettings.toolKey, toolKey)))
-    .limit(1);
-  const model = settings?.model ?? DEFAULT_MODEL_ID;
+  const currentUser = await getCurrentUser();
+  const model = await getEffectiveModel(workspaceId, toolKey);
 
   let promptContent = "";
   if (promptId) {
@@ -93,6 +90,7 @@ export async function runTool(toolKey: string, _prevState: RunState, formData: F
       toolKey,
       promptTemplateId: promptId || null,
       model,
+      userId: currentUser?.id,
       usedProjectContext: usedContext,
       status: "completed",
       inputSummary: userInput.slice(0, 500),
@@ -110,6 +108,7 @@ export async function runTool(toolKey: string, _prevState: RunState, formData: F
       toolKey,
       promptTemplateId: promptId || null,
       model,
+      userId: currentUser?.id,
       usedProjectContext: usedContext,
       status: "error",
       inputSummary: userInput.slice(0, 500),

@@ -12,14 +12,15 @@ import {
   featureWorkflow,
   featureWorkflowDocument,
   promptTemplate,
-  toolSettings,
 } from "@/db/schema";
 import { eq, and, asc } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
+import { getCurrentUser } from "@/db/users";
 import { getTool } from "@/lib/tools/registry";
 import { ensureDefaultPrompts } from "@/lib/tools/prompts";
+import { getEffectiveModel } from "@/lib/tools/model-settings";
 import { getAnthropicClient } from "@/lib/llm/client";
-import { DEFAULT_MODEL_ID, estimateCostUsd } from "@/lib/models";
+import { estimateCostUsd } from "@/lib/models";
 import { embedTexts } from "@/lib/ingest/embed";
 import { searchRelevantChunks, ingestMarkdownDocument } from "@/lib/ingest/pipeline";
 
@@ -178,12 +179,12 @@ async function runInterviewTurn({
   await db.insert(chatMessage).values({ runId: run.id, role: "user", content: userMessage });
 
   try {
-    const [settings] = await db
-      .select()
-      .from(toolSettings)
-      .where(and(eq(toolSettings.workspaceId, workspaceId), eq(toolSettings.toolKey, toolKey)))
-      .limit(1);
-    const model = settings?.model ?? run.model ?? DEFAULT_MODEL_ID;
+    // There is no "delete a tool setting" action, so if a setting existed
+    // when this run started (see startChat below) it's still there now --
+    // getEffectiveModel's own fallback chain (personal -> legacy company
+    // default -> DEFAULT_MODEL_ID) is enough without also falling back to
+    // run.model here.
+    const model = await getEffectiveModel(workspaceId, toolKey);
 
     const systemPrompt = await getActiveSystemPrompt(toolKey);
     const { block: contextBlock, used: usedContext } = await fetchProjectContext(workspaceId, userMessage);
@@ -300,16 +301,20 @@ export async function startChat(
     featureWorkflowId = feature.id;
   }
 
-  const [settings] = await db
-    .select()
-    .from(toolSettings)
-    .where(and(eq(toolSettings.workspaceId, workspaceId), eq(toolSettings.toolKey, toolKey)))
-    .limit(1);
-  const model = settings?.model ?? DEFAULT_MODEL_ID;
+  const currentUser = await getCurrentUser();
+  const model = await getEffectiveModel(workspaceId, toolKey);
 
   const [newRun] = await db
     .insert(runTable)
-    .values({ workspaceId, toolKey, featureWorkflowId, model, status: "running", inputSummary: message.slice(0, 300) })
+    .values({
+      workspaceId,
+      toolKey,
+      featureWorkflowId,
+      model,
+      userId: currentUser?.id,
+      status: "running",
+      inputSummary: message.slice(0, 300),
+    })
     .returning();
 
   await runInterviewTurn({ toolKey, run: newRun, workspaceId, priorMessages: [], userMessage: message });

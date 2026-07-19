@@ -115,8 +115,10 @@ For a rough infrastructure cost estimate under light single-user load, see `PLAN
   document's edit page open at a time, with a clear "X is currently editing this" message for anyone else who
   tries — the lock is released on save/cancel, or auto-expires ~3 minutes after the last heartbeat if a tab
   crashes or is force-closed, so a document can never get stuck locked forever.
-- **Per-user model settings and usage stats are not split out yet** — `/settings` and the per-tool "Stats" tab
-  are still workspace-wide (i.e. company-wide), not per-user. Planned as a later phase.
+- **Per-user model settings can quietly diverge from what a teammate expects** — each person picks their own
+  model per tool in Settings (falling back to whatever the company default happened to be, then to the
+  built-in default), so two teammates running the same tool may silently get different models/costs unless
+  they compare notes. There's no UI warning about this.
 - **Embedded-image captioning is best-effort and uncached** — up to 10 images per document are described
   sequentially by a vision model (`claude-haiku-4-5`) on every ingest (upload, edit-save, or manual
   reprocess), so a document with several images takes noticeably longer to (re)process; a failed/unreachable/
@@ -137,7 +139,7 @@ src/
     models.ts       Model and pricing catalog
     llm/client.ts   Anthropic client (Vercel AI SDK)
     ingest/         .md parsing/chunking, embeddings, image captioning, ingestion pipeline
-    tools/          Tool registry, shared contract, default prompts
+    tools/          Tool registry, shared contract, default prompts, per-user model resolution
     presence.ts     "Online now" freshness window + isOnline() helper
   app/
     sign-in/        Google sign-in page
@@ -145,11 +147,11 @@ src/
     api/auth/[...nextauth]/ Auth.js route handler
     (protected)/    Everything below requires a signed-in user in a company -- see layout.tsx
       presence-actions.ts  touchPresence() -- refreshes the signed-in user's lastSeenAt
-      company/      Member roster (with online/last-seen) + owner-only email invites
-      settings/     Settings (GitLab/LLM, per-tool models)
+      company/      Member roster (online/last-seen) + owner-only email invites + company-wide usage
+      settings/     Settings -- GitLab/LLM (company-wide), model per tool (personal to you)
       documents/    Document upload/status, and per-document edit locking (see [id]/edit/)
       history/      Unfinished features + run log
-      tools/[toolKey]/ Runner, "Prompts" and "Stats" tabs per tool
+      tools/[toolKey]/ Runner, "Prompts" tab, and "Stats" tab (your usage + company total) per tool
 ```
 
 The full plan and rationale for the architectural decisions is in `PLAN.md`.
