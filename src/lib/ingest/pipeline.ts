@@ -67,15 +67,22 @@ export async function ingestMarkdownDocument(documentId: string): Promise<void> 
   }
 }
 
-/** Vector search for relevant chunks to build context (RAG). */
+/**
+ * Vector search for relevant chunks to build context (RAG). Joins in the
+ * parent document's filename — callers that only destructure headingPath /
+ * content (the original shape) are unaffected; callers that want a citeable
+ * source (e.g. the Documents Q&A feature) can read `documentFilename` too.
+ */
 export async function searchRelevantChunks(workspaceId: string, queryEmbedding: number[], limit = 8) {
   const { sql } = await import("drizzle-orm");
   return db.execute(sql`
-    SELECT id, document_id as "documentId", heading_path as "headingPath", content,
-           1 - (embedding <=> ${JSON.stringify(queryEmbedding)}::vector) AS similarity
-    FROM document_chunk
-    WHERE workspace_id = ${workspaceId} AND embedding IS NOT NULL
-    ORDER BY embedding <=> ${JSON.stringify(queryEmbedding)}::vector
+    SELECT dc.id, dc.document_id as "documentId", dc.heading_path as "headingPath", dc.content,
+           d.filename as "documentFilename",
+           1 - (dc.embedding <=> ${JSON.stringify(queryEmbedding)}::vector) AS similarity
+    FROM document_chunk dc
+    JOIN document d ON d.id = dc.document_id
+    WHERE dc.workspace_id = ${workspaceId} AND dc.embedding IS NOT NULL
+    ORDER BY dc.embedding <=> ${JSON.stringify(queryEmbedding)}::vector
     LIMIT ${limit}
   `);
 }

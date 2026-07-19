@@ -3,6 +3,7 @@ import { document } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { getDefaultWorkspaceId } from "@/db/workspace";
 import { SetupNotice } from "@/components/setup-notice";
+import { DocumentsQA } from "@/components/documents-qa";
 import { uploadDocument, reingestDocument, deleteDocument } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -77,6 +78,8 @@ export default async function DocumentsPage() {
             You can select multiple .md files at once — they&apos;re uploaded and processed one by one.
           </p>
         </section>
+
+        <DocumentsQA />
 
         <section>
           <h2 className="text-sm font-medium text-neutral-600 mb-2">Uploaded documents ({docs.length})</h2>
