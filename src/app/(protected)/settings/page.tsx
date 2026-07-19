@@ -130,7 +130,7 @@ export default async function SettingsPage() {
                 Save
               </button>
               <span className="text-xs text-neutral-400">
-                Leaving the token field empty won't overwrite the one already entered this session
+                Leaving the token field empty won&apos;t overwrite the one already entered this session
               </span>
             </div>
           </form>

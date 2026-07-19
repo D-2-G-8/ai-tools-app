@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { startChat, sendChatMessage, type ChatActionState } from "@/app/(protected)/tools/[toolKey]/chat-actions";
 
 interface ChatMessageItem {
@@ -68,9 +69,9 @@ export function ChatConversation({
       {status === "completed" && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
           The document is ready{resultDocumentFilename ? ` — "${resultDocumentFilename}"` : ""}. Find it on the{" "}
-          <a href="/documents" className="underline">
+          <Link href="/documents" className="underline">
             Documents
-          </a>{" "}
+          </Link>{" "}
           page. You can keep chatting to refine or extend it — the document will be updated.
         </div>
       )}

@@ -32,7 +32,7 @@ export function RunnerForm({
             defaultValue={activePrompt?.id ?? ""}
             className="rounded-md border border-neutral-300 px-2 py-1.5 text-sm"
           >
-            {prompts.length === 0 && <option value="">(no prompts — add one on the "Prompts" tab)</option>}
+            {prompts.length === 0 && <option value="">(no prompts — add one on the &quot;Prompts&quot; tab)</option>}
             {prompts.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
