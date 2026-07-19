@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { put, del } from "@vercel/blob";
 import { db } from "@/db";
 import { document } from "@/db/schema";
@@ -83,4 +84,54 @@ export async function deleteDocument(documentId: string) {
     await db.delete(document).where(eq(document.id, documentId));
   }
   revalidatePath("/documents");
+}
+
+/**
+ * Saves edited markdown content from the document edit page: uploads it as a
+ * new Blob, points the document row at it, deletes the old Blob, and
+ * re-ingests (re-chunks + re-embeds) so RAG search and the Business
+ * Requirements tool's project context stay in sync with the edit. Mirrors
+ * the error-handling shape of uploadDocument/finalizeDocument — any failure
+ * is caught and recorded on the document row rather than thrown, so a bad
+ * edit can never crash the page.
+ */
+export async function updateDocumentContent(documentId: string, formData: FormData) {
+  const content = String(formData.get("content") ?? "");
+
+  const [doc] = await db.select().from(document).where(eq(document.id, documentId)).limit(1);
+  if (!doc) {
+    redirect("/documents");
+  }
+
+  const previousBlobUrl = doc.blobUrl;
+
+  try {
+    const blob = await put(`documents/${Date.now()}-${doc.filename}`, content, {
+      access: "public",
+      addRandomSuffix: true,
+    });
+
+    await db
+      .update(document)
+      .set({ blobUrl: blob.url, status: "processing", errorMessage: null, updatedAt: new Date() })
+      .where(eq(document.id, documentId));
+
+    await del(previousBlobUrl).catch(() => {});
+
+    try {
+      await ingestMarkdownDocument(documentId);
+    } catch {
+      // Status is already marked "error" inside ingestMarkdownDocument.
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await db
+      .update(document)
+      .set({ status: "error", errorMessage: message, updatedAt: new Date() })
+      .where(eq(document.id, documentId));
+  }
+
+  revalidatePath("/documents");
+  revalidatePath(`/documents/${documentId}`);
+  redirect(`/documents/${documentId}`);
 }

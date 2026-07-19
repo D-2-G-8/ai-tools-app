@@ -5,6 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import { getDefaultWorkspaceId } from "@/db/workspace";
 import { SetupNotice } from "@/components/setup-notice";
 import { DocumentsQA } from "@/components/documents-qa";
+import { statusLabel, statusClass } from "./shared";
 import { uploadDocument, reingestDocument, deleteDocument } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -12,18 +13,6 @@ export const dynamic = "force-dynamic";
 // the same server action — give it more headroom than the default so a
 // multi-file batch doesn't get killed mid-way through.
 export const maxDuration = 60;
-
-const statusLabel: Record<string, string> = {
-  processing: "processing",
-  ready: "ready",
-  error: "error",
-};
-
-const statusClass: Record<string, string> = {
-  processing: "bg-amber-100 text-amber-700",
-  ready: "bg-emerald-100 text-emerald-700",
-  error: "bg-red-100 text-red-700",
-};
 
 async function loadDocuments() {
   const workspaceId = await getDefaultWorkspaceId();
@@ -108,6 +97,9 @@ export default async function DocumentsPage() {
                   <div className="flex shrink-0 items-center gap-3">
                     <Link href={`/documents/${doc.id}`} className="text-xs text-neutral-600 hover:underline">
                       View
+                    </Link>
+                    <Link href={`/documents/${doc.id}/edit`} className="text-xs text-neutral-600 hover:underline">
+                      Edit
                     </Link>
                     {doc.status === "error" && (
                       <form action={reingestDocument.bind(null, doc.id)}>
