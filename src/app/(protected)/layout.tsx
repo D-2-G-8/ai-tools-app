@@ -50,7 +50,7 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
   const onlineCount = companyMembers.filter((m) => isOnline(m.lastSeenAt)).length;
 
   return (
-    <div className="min-h-full flex bg-neutral-50 text-neutral-900 font-sans">
+    <div className="min-h-screen flex bg-neutral-50 text-neutral-900 font-sans">
       <PresenceHeartbeat />
       <aside className="w-64 shrink-0 border-r border-neutral-200 bg-white p-4 flex flex-col gap-6">
         <div className="text-lg font-semibold px-2">AI Tools Platform</div>
