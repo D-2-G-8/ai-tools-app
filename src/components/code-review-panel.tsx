@@ -8,8 +8,8 @@ import {
   type RunReviewState,
   type EstimateV3State,
   type PostToGitlabState,
-  type ReviewVersion,
 } from "@/app/(protected)/tools/[toolKey]/code-review-actions";
+import type { ReviewVersion } from "@/lib/code-review/schema";
 import type { GitlabProjectMrs, GitlabMergeRequest } from "@/lib/gitlab/client";
 import type { CodeReviewFindingRecord } from "@/db/schema";
 

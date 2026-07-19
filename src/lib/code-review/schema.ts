@@ -4,7 +4,7 @@ import { z } from "zod";
  * Structured-output schemas for AI Review (V1/V2/V3), forced via
  * generateObject (Vercel AI SDK) -- see v1.ts/v2.ts/v3.ts. Ported from the
  * reference Python prototype's REVIEW_TOOL / RECONCILE_TOOL Anthropic
- * tool-use schemas (~/Desktop/отчет разработка/metrics/ai_reviewer.py).
+ * tool-use schemas.
  *
  * Shapes here must stay structurally compatible with
  * CodeReviewFindingRecord in src/db/schema.ts (that's a plain TS interface,
@@ -17,6 +17,12 @@ export type FindingSeverity = (typeof findingSeverityValues)[number];
 
 export const findingVerdictValues = ["confirmed", "needs_verification"] as const;
 export type FindingVerdict = (typeof findingVerdictValues)[number];
+
+// Kept here (a plain module, not a "use server" action file) so it can be
+// used as a runtime value -- Next.js Server Action files may only export
+// async functions, so this can't live in code-review-actions.ts.
+export const reviewVersionValues = ["v1", "v2", "v3"] as const;
+export type ReviewVersion = (typeof reviewVersionValues)[number];
 
 export const findingSchema = z.object({
   file: z.string().describe("File path exactly as it appears in the diff."),

@@ -13,6 +13,8 @@ import { buildDiffPrompt } from "@/lib/code-review/prompt";
 import { runV1Review } from "@/lib/code-review/v1";
 import { runV2Review, V2_DEFAULT_REVIEWER_MODELS, V2_DEFAULT_JUDGE_MODEL } from "@/lib/code-review/v2";
 import { runV3Review, V3_DEFAULT_AGENT_MODEL, V3_DEFAULT_JUDGE_MODEL, estimateV3CostUsd } from "@/lib/code-review/v3";
+import { formatReviewComment } from "@/lib/code-review/format";
+import { type ReviewVersion } from "@/lib/code-review/schema";
 
 const REVIEW_TOOL_KEY = "code-review";
 
@@ -69,9 +71,6 @@ async function requireGitlabAuth(): Promise<GitlabAuth> {
   const session = await getSession();
   return { gitlabUrl: readiness.gitlabUrl, token: session.gitlabToken! };
 }
-
-export const reviewVersionValues = ["v1", "v2", "v3"] as const;
-export type ReviewVersion = (typeof reviewVersionValues)[number];
 
 export interface RunReviewState {
   runId?: string;
@@ -234,60 +233,6 @@ export async function estimateV3Review(
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
-}
-
-function escapeTableCell(value: string): string {
-  return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>").trim();
-}
-
-const SEVERITY_LABEL: Record<string, string> = { critical: "Critical", high: "High", medium: "Medium" };
-const SEVERITY_EMOJI: Record<string, string> = { critical: "🔴", high: "🟠", medium: "🟡" };
-
-function findingsTable(findings: CodeReviewFindingRecord[], cross: boolean): string[] {
-  const rows: string[] = [];
-  if (cross) {
-    rows.push("| File | Severity | Agreement | Issue | Why fix it |");
-    rows.push("| --- | --- | --- | --- | --- |");
-  } else {
-    rows.push("| File | Severity | Issue | Why fix it |");
-    rows.push("| --- | --- | --- | --- |");
-  }
-  for (const f of findings) {
-    const label = `${SEVERITY_EMOJI[f.severity] ?? ""} ${SEVERITY_LABEL[f.severity] ?? f.severity}`;
-    if (cross) {
-      rows.push(
-        `| \`${escapeTableCell(f.file)}\` | ${label} | ${f.agreement ?? 1}× | ${escapeTableCell(f.bug)} | ${escapeTableCell(f.why)} |`,
-      );
-    } else {
-      rows.push(`| \`${escapeTableCell(f.file)}\` | ${label} | ${escapeTableCell(f.bug)} | ${escapeTableCell(f.why)} |`);
-    }
-  }
-  return rows;
-}
-
-/** Ported from the Python prototype's format_comment -- the Markdown body posted to the MR. */
-export function formatReviewComment(findings: CodeReviewFindingRecord[], truncated: boolean): string {
-  const lines = ["## 🤖 AI review", ""];
-  const cross = findings.some((f) => f.agreement !== undefined);
-  const confirmed = findings.filter((f) => f.verdict !== "needs_verification");
-  const toVerify = findings.filter((f) => f.verdict === "needs_verification");
-
-  if (confirmed.length === 0) {
-    lines.push(toVerify.length > 0 ? "No confirmed issues ✅" : "No issues found ✅");
-  } else {
-    lines.push(...findingsTable(confirmed, cross));
-  }
-
-  if (toVerify.length > 0) {
-    lines.push("", "### ⚠️ Needs verification", "_Plausible but not confirmed from the diff alone — a human should check these._", "");
-    lines.push(...findingsTable(toVerify, cross));
-  }
-
-  if (truncated) {
-    lines.push("", "> ⚠️ The diff was truncated due to a size limit — not all changes were analyzed.");
-  }
-  lines.push("", "> _Automated comment. Verify the findings before fixing._");
-  return lines.join("\n");
 }
 
 export interface PostToGitlabState {

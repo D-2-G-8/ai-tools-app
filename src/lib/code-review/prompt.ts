@@ -1,7 +1,6 @@
 /**
  * Prompts and diff-formatting for AI Review (V1/V2/V3) -- ported from the
- * reference Python prototype (~/Desktop/отчет разработка/metrics/ai_reviewer.py)
- * and adjusted per the user's article (aicodereviewarticlev7.md, Section 3):
+ * reference Python prototype and adjusted per the user's article (aicodereviewarticlev7.md, Section 3):
  * explicitly excluding style/naming nits, and instructing the model to skip
  * low-confidence findings rather than report them -- "a reviewer that cries
  * wolf gets ignored within a week."
