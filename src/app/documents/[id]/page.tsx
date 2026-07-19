@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { loadDocumentForWorkspace, loadDocumentContent, statusLabel, statusClass } from "../shared";
 import { splitMarkdownFences } from "@/lib/markdown/split-fences";
 import { BpmnDiagram } from "@/components/bpmn-diagram";
+import { MermaidDiagram } from "@/components/mermaid-diagram";
 
 export const dynamic = "force-dynamic";
 
@@ -16,9 +17,10 @@ export default async function DocumentViewPage({
   if (!doc) notFound();
 
   const { content, error: contentError } = await loadDocumentContent(doc.blobUrl);
-  // ```bpmn fenced blocks (see business-requirements-template.ts) are stored
-  // as plain text like everything else, but rendered here as diagrams --
-  // split them out so only those segments get the BpmnDiagram treatment.
+  // ```bpmn and ```mermaid fenced blocks (see business-requirements-template.ts)
+  // are stored as plain text like everything else, but rendered here as
+  // diagrams -- split them out so only those segments get the diagram
+  // treatment.
   const segments = content !== undefined ? splitMarkdownFences(content) : null;
 
   return (
@@ -64,6 +66,8 @@ export default async function DocumentViewPage({
           {segments!.map((segment, i) =>
             segment.type === "bpmn" ? (
               <BpmnDiagram key={i} xml={segment.content} />
+            ) : segment.type === "mermaid" ? (
+              <MermaidDiagram key={i} definition={segment.content} />
             ) : segment.content.trim() ? (
               <section key={i} className="rounded-lg border border-neutral-200 bg-white p-5">
                 <pre className="whitespace-pre-wrap break-words font-mono text-sm text-neutral-800">

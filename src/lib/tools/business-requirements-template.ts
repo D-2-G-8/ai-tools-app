@@ -25,6 +25,9 @@ Proactively ask about the following even if the user never brings it up (don't s
   storage and any relevant privacy regulation);
 - error handling — what exactly is shown to the user in each scenario;
 - unhappy paths of the business process, not just the happy path;
+- whether the feature involves interaction between multiple actors/systems (e.g. frontend + backend + an
+  external service/integration) — if so, get enough detail on the call sequence and each side's response
+  (success and failure) to build a sequence diagram later;
 - success metrics for the feature (up to 3).
 
 === DOCUMENT TEMPLATE (structure and numbering to use in the final document) ===
@@ -92,6 +95,41 @@ Proactively ask about the following even if the user never brings it up (don't s
              </bpmndi:BPMNPlane>
            </bpmndi:BPMNDiagram>
          </bpmn:definitions>
+         \`\`\`
+  1.4.2. Interaction sequence between actors/systems — only when the feature involves more than one
+         participant exchanging steps over time (e.g. frontend + backend + an external service/integration, or
+         several internal systems calling each other). Skip this subsection entirely if the feature is a single
+         straightforward flow with no cross-system interaction worth diagramming.
+         When it applies, render it as a Mermaid sequence diagram (\`\`\`mermaid ... \`\`\` block starting with
+         \`sequenceDiagram\`) plus a short text description of the exchange. The document viewer renders
+         \`\`\`mermaid blocks as an actual diagram image, so the definition must be complete and renderable, not
+         just illustrative:
+         - name every participant explicitly (\`participant X as Display Name\`) instead of relying on
+           auto-detected names from message lines;
+         - use \`->>\`/\`-->>\` for calls and their responses (solid vs. dashed arrows), and \`alt\`/\`else\`/\`end\`
+           to show success vs. failure branches, matching whatever unhappy paths were already described in 1.4.1;
+         - keep it small and readable (roughly 4-8 participants/messages per path); if there are several
+           independent flows, use two or three separate \`\`\`mermaid blocks instead of one large diagram.
+         Minimal shape to follow (adapt participants/messages to the actual interaction, this is only a skeleton):
+         \`\`\`mermaid
+         sequenceDiagram
+             participant U as User
+             participant FE as Frontend
+             participant BE as Backend
+             participant EXT as External Service
+
+             U->>FE: ...
+             FE->>BE: ...
+             BE->>EXT: ...
+             alt ...
+                 EXT-->>BE: ...
+                 BE-->>FE: ...
+                 FE-->>U: ...
+             else ...
+                 EXT-->>BE: ...
+                 BE-->>FE: ...
+                 FE-->>U: ...
+             end
          \`\`\`
 1.5. Business rules for error handling (what is shown to the user)
 1.6. Description of functions and fields
