@@ -6,6 +6,10 @@ import { SetupNotice } from "@/components/setup-notice";
 import { uploadDocument, reingestDocument, deleteDocument } from "./actions";
 
 export const dynamic = "force-dynamic";
+// Uploading several files in one request runs their ingests sequentially in
+// the same server action — give it more headroom than the default so a
+// multi-file batch doesn't get killed mid-way through.
+export const maxDuration = 60;
 
 const statusLabel: Record<string, string> = {
   processing: "processing",
@@ -52,13 +56,14 @@ export default async function DocumentsPage() {
         </div>
 
         <section className="rounded-lg border border-neutral-200 bg-white p-5">
-          <h2 className="text-sm font-medium text-neutral-700 mb-4">Upload a .md file</h2>
+          <h2 className="text-sm font-medium text-neutral-700 mb-4">Upload .md files</h2>
           <form action={uploadDocument} encType="multipart/form-data" className="flex items-center gap-3">
             <input
               type="file"
               name="file"
               accept=".md,text/markdown"
               required
+              multiple
               className="text-sm"
             />
             <button
@@ -68,6 +73,9 @@ export default async function DocumentsPage() {
               Upload and process
             </button>
           </form>
+          <p className="mt-2 text-xs text-neutral-400">
+            You can select multiple .md files at once — they&apos;re uploaded and processed one by one.
+          </p>
         </section>
 
         <section>
