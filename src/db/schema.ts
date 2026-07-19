@@ -11,18 +11,127 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  primaryKey,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 /**
  * DB schema per PLAN.md, section 4.
  *
- * Single-user mode: in the MVP `workspace` is effectively a single row,
- * but all tables are already tied to workspaceId, so multi-user mode can
- * be added later without a structural migration.
+ * Multi-company mode (see README "Authentication setup"): every real user
+ * belongs to exactly one `company` (via `user.companyId`), and every
+ * `company` has exactly one `workspace` (via `workspace.companyId`) — all
+ * the workspace-scoped tables below (document, run, promptTemplate, etc.)
+ * are unchanged by this and still just key off `workspaceId`, they simply
+ * now resolve that id through the signed-in user's company instead of a
+ * single global row (see src/db/workspace.ts, getCurrentWorkspaceId).
  *
  * Secret tokens (GitLab PAT, LLM provider token) are NEVER stored in
- * these tables — see src/lib/session.ts.
+ * these tables — see src/lib/session.ts. Auth.js session/account data
+ * (Google OAuth tokens) IS stored in `account`/`session` below, since
+ * that's Auth.js's own adapter contract, not a user-entered secret in the
+ * session.ts sense.
  */
+
+// --- Auth.js (NextAuth v5) tables -------------------------------------
+// Shape required by @auth/drizzle-adapter's Postgres adapter. `user.id`
+// uses uuid/defaultRandom() (like every other table here) rather than the
+// adapter's default text id — this is a supported customization as long as
+// the column names/semantics match what the adapter expects.
+
+export const company = pgTable("company", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 255 }).notNull(),
+  // Explicit AnyPgColumn return type breaks the company<->user circular
+  // type inference (user.companyId references company.id right below).
+  createdByUserId: uuid("created_by_user_id").references((): AnyPgColumn => user.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const companyRoleValues = ["owner", "member"] as const;
+export type CompanyRole = (typeof companyRoleValues)[number];
+
+export const user = pgTable("user", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name"),
+  email: text("email").notNull().unique(),
+  emailVerified: timestamp("email_verified", { withTimezone: true }),
+  image: text("image"),
+  // Nullable until the user finishes onboarding (create/join a company) —
+  // see src/app/onboarding.
+  companyId: uuid("company_id").references((): AnyPgColumn => company.id, { onDelete: "set null" }),
+  companyRole: varchar("company_role", { length: 16 }), // "owner" | "member", null until in a company
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const account = pgTable(
+  "account",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    type: varchar("type", { length: 32 }).notNull(),
+    provider: varchar("provider", { length: 64 }).notNull(),
+    providerAccountId: varchar("provider_account_id", { length: 255 }).notNull(),
+    refresh_token: text("refresh_token"),
+    access_token: text("access_token"),
+    expires_at: integer("expires_at"),
+    token_type: varchar("token_type", { length: 32 }),
+    scope: text("scope"),
+    id_token: text("id_token"),
+    session_state: text("session_state"),
+  },
+  (t) => [primaryKey({ columns: [t.provider, t.providerAccountId] })],
+);
+
+export const session = pgTable("session", {
+  sessionToken: text("session_token").primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  expires: timestamp("expires", { withTimezone: true }).notNull(),
+});
+
+export const verificationToken = pgTable(
+  "verification_token",
+  {
+    identifier: text("identifier").notNull(),
+    token: text("token").notNull(),
+    expires: timestamp("expires", { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.identifier, t.token] })],
+);
+
+// --- Company membership -------------------------------------------------
+
+export const companyInviteStatusValues = ["pending", "accepted"] as const;
+export type CompanyInviteStatus = (typeof companyInviteStatusValues)[number];
+
+/**
+ * A pending (or already-accepted) invite for a specific email to join a
+ * company. No email is actually sent (no transactional-email provider in
+ * this app) — an invite just auto-activates the next time that address
+ * signs in with Google (see src/app/onboarding/actions.ts); the inviter
+ * has to tell the invitee out-of-band that they've been invited.
+ */
+export const companyInvite = pgTable(
+  "company_invite",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => company.id, { onDelete: "cascade" }),
+    email: varchar("email", { length: 255 }).notNull(), // stored lowercased
+    invitedByUserId: uuid("invited_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    status: varchar("status", { length: 16 }).notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("company_invite_company_email_idx").on(t.companyId, t.email),
+    index("company_invite_email_idx").on(t.email),
+  ],
+);
 
 export const componentStackValues = [
   "react-scss",
@@ -33,6 +142,11 @@ export type ComponentStack = (typeof componentStackValues)[number];
 
 export const workspace = pgTable("workspace", {
   id: uuid("id").primaryKey().defaultRandom(),
+  // Nullable so the pre-auth default workspace row needs no data backfill —
+  // it gets adopted by whichever company is created first after this ships
+  // (see src/app/onboarding/actions.ts, createCompany). Every workspace
+  // created from that point on always has this set.
+  companyId: uuid("company_id").references(() => company.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 255 }).notNull().default("Default workspace"),
   // Not secrets — URLs can be stored permanently. The tokens themselves live
   // only in the session cookie (see src/lib/session.ts), never end up here.
@@ -70,6 +184,11 @@ export const document = pgTable(
     errorMessage: text("error_message"),
     title: text("title"),
     chunkCount: integer("chunk_count").notNull().default(0),
+    // Nullable -- documents created before this shipped have no recorded
+    // author/editor, and both go null if that user's account is ever
+    // removed (onDelete: set null) rather than the document disappearing.
+    createdByUserId: uuid("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    updatedByUserId: uuid("updated_by_user_id").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

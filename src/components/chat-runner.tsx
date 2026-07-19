@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef } from "react";
-import { startChat, sendChatMessage, type ChatActionState } from "@/app/tools/[toolKey]/chat-actions";
+import { startChat, sendChatMessage, type ChatActionState } from "@/app/(protected)/tools/[toolKey]/chat-actions";
 
 interface ChatMessageItem {
   id: string;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { askDocumentsQuestion, type DocumentsQAState } from "@/app/documents/qa-actions";
+import { askDocumentsQuestion, type DocumentsQAState } from "@/app/(protected)/documents/qa-actions";
 
 export function DocumentsQA() {
   const [state, formAction, pending] = useActionState<DocumentsQAState, FormData>(askDocumentsQuestion, {});

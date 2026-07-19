@@ -1,7 +1,7 @@
 import { db } from "@/db";
 import { promptTemplate } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
-import { getDefaultWorkspaceId } from "@/db/workspace";
+import { getCurrentWorkspaceId } from "@/db/workspace";
 import { getTool } from "./registry";
 
 /**
@@ -16,7 +16,7 @@ import { getTool } from "./registry";
  * added alongside is left alone.
  */
 export async function ensureDefaultPrompts(toolKey: string) {
-  const workspaceId = await getDefaultWorkspaceId();
+  const workspaceId = await getCurrentWorkspaceId();
   const tool = getTool(toolKey);
   if (!tool || tool.defaultPrompts.length === 0) return;
 

@@ -1,0 +1,113 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { inArray } from "drizzle-orm";
+import { db } from "@/db";
+import { user } from "@/db/schema";
+import { loadDocumentForWorkspace, loadDocumentContent, statusLabel, statusClass } from "../shared";
+import { splitMarkdownFences } from "@/lib/markdown/split-fences";
+import { BpmnDiagram } from "@/components/bpmn-diagram";
+import { MermaidDiagram } from "@/components/mermaid-diagram";
+
+export const dynamic = "force-dynamic";
+
+export default async function DocumentViewPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const doc = await loadDocumentForWorkspace(id);
+  if (!doc) notFound();
+
+  // Best-effort -- a document created/edited before this shipped simply has
+  // null author ids, and a since-removed user's id is set null too (see
+  // schema.ts), so this can legitimately come back empty.
+  const authorIds = [doc.createdByUserId, doc.updatedByUserId].filter((v): v is string => v !== null);
+  const authors = authorIds.length > 0 ? await db.select().from(user).where(inArray(user.id, authorIds)) : [];
+  const authorLabel = (userId: string | null) => {
+    if (!userId) return null;
+    const match = authors.find((a) => a.id === userId);
+    return match ? match.name ?? match.email : null;
+  };
+  const createdByLabel = authorLabel(doc.createdByUserId);
+  const updatedByLabel = doc.updatedByUserId !== doc.createdByUserId ? authorLabel(doc.updatedByUserId) : null;
+
+  const { content, error: contentError } = await loadDocumentContent(doc.blobUrl);
+  // ```bpmn / ```mermaid fenced blocks and inline ![alt](src) images (see
+  // business-requirements-template.ts and lib/ingest/images.ts) are stored
+  // as plain text like everything else, but rendered here as diagrams/
+  // pictures -- split them out so only those segments get special treatment.
+  const segments = content !== undefined ? splitMarkdownFences(content) : null;
+
+  return (
+    <div className="flex flex-col gap-6 max-w-4xl">
+      <div>
+        <Link href="/documents" className="text-sm text-neutral-500 hover:underline">
+          ← Back to documents
+        </Link>
+      </div>
+
+      <div>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-semibold break-words">{doc.title ?? doc.filename}</h1>
+          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${statusClass[doc.status]}`}>
+            {statusLabel[doc.status] ?? doc.status}
+          </span>
+        </div>
+        <p className="mt-1 text-sm text-neutral-500">
+          {doc.filename} · {doc.chunkCount} chunks · uploaded {doc.createdAt.toLocaleString()}
+          {createdByLabel && <> · created by {createdByLabel}</>}
+          {updatedByLabel && <> · last edited by {updatedByLabel}</>}
+        </p>
+        {doc.status === "error" && doc.errorMessage && (
+          <p className="mt-1 text-sm text-red-600">{doc.errorMessage}</p>
+        )}
+        <div className="mt-1 flex items-center gap-3 text-xs text-neutral-400">
+          <Link href={`/documents/${doc.id}/edit`} className="hover:underline">
+            Edit
+          </Link>
+          <a href={`/documents/${doc.id}/download`} className="hover:underline">
+            Download
+          </a>
+          <a href={doc.blobUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
+            Open original file
+          </a>
+        </div>
+      </div>
+
+      {contentError ? (
+        <section className="rounded-lg border border-neutral-200 bg-white p-5">
+          <p className="text-sm text-red-600">Couldn&apos;t load the file content: {contentError}</p>
+        </section>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {segments!.map((segment, i) =>
+            segment.type === "bpmn" ? (
+              <BpmnDiagram key={i} xml={segment.content} />
+            ) : segment.type === "mermaid" ? (
+              <MermaidDiagram key={i} definition={segment.content} />
+            ) : segment.type === "image" ? (
+              <section key={i} className="rounded-lg border border-neutral-200 bg-white p-4">
+                {/* eslint-disable-next-line @next/next/no-img-element -- image
+                    sources here are arbitrary Blob URLs / data URIs supplied
+                    at runtime, not static assets next/image can optimize. */}
+                <img
+                  src={segment.src}
+                  alt={segment.alt || "Embedded image"}
+                  className="max-w-full rounded"
+                />
+                {segment.alt && <p className="mt-2 text-xs text-neutral-400">{segment.alt}</p>}
+              </section>
+            ) : segment.content.trim() ? (
+              <section key={i} className="rounded-lg border border-neutral-200 bg-white p-5">
+                <pre className="whitespace-pre-wrap break-words font-mono text-sm text-neutral-800">
+                  {segment.content}
+                </pre>
+              </section>
+            ) : null
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

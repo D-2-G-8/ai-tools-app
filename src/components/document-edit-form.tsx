@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useRef, useState, type ChangeEvent } from "react";
-import { updateDocumentContent } from "@/app/documents/actions";
-import { uploadDocumentImage } from "@/app/documents/image-actions";
+import { updateDocumentContent } from "@/app/(protected)/documents/actions";
+import { uploadDocumentImage } from "@/app/(protected)/documents/image-actions";
 
 /**
  * The document edit form, plus a way to attach a photo/screenshot while

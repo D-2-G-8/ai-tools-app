@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { runTool, type RunState } from "@/app/tools/[toolKey]/actions";
+import { runTool, type RunState } from "@/app/(protected)/tools/[toolKey]/actions";
 
 interface PromptOption {
   id: string;
