@@ -8,7 +8,7 @@ export default async function SignInPage() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-neutral-50 p-8">
+    <div className="flex min-h-screen items-center justify-center bg-neutral-50 p-8">
       <div className="w-full max-w-sm rounded-lg border border-neutral-200 bg-white p-8 text-center">
         <h1 className="text-xl font-semibold">AI Tools Platform</h1>
         <p className="mt-2 text-sm text-neutral-500">

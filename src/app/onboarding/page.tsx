@@ -20,7 +20,7 @@ export default async function OnboardingPage() {
     .where(and(eq(companyInvite.email, currentUser.email.toLowerCase()), eq(companyInvite.status, "pending")));
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-neutral-50 p-8">
+    <div className="flex min-h-screen items-center justify-center bg-neutral-50 p-8">
       <div className="flex w-full max-w-md flex-col gap-6">
         <div className="text-center">
           <h1 className="text-xl font-semibold">Welcome, {currentUser.name ?? currentUser.email}</h1>
