@@ -3,10 +3,18 @@ import { document, documentChunk } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { chunkMarkdown, parseMarkdown } from "./markdown";
 import { embedTexts } from "./embed";
+import { describeImagesInMarkdown } from "./images";
 
 /**
- * Ingest of a single .md document: download from Blob -> parse -> chunk by
- * headings -> get embeddings -> write into document_chunk.
+ * Ingest of a single .md document: download from Blob -> parse -> describe
+ * any embedded images (screenshots the user pasted in while editing, or
+ * images already present in an uploaded file) with a cheap vision model so
+ * their content is searchable -> chunk by headings -> get embeddings ->
+ * write into document_chunk.
+ *
+ * The image-description step only affects what gets embedded (see
+ * ingest/images.ts) -- the document's stored Blob (and what the document
+ * viewer renders) is untouched, so images always still show as pictures.
  *
  * MVP: called synchronously right after the file upload (see
  * app/documents/actions.ts). For large batches of documents it should be moved
@@ -22,7 +30,8 @@ export async function ingestMarkdownDocument(documentId: string): Promise<void> 
     const raw = await res.text();
 
     const { title } = parseMarkdown(raw);
-    const chunks = chunkMarkdown(raw);
+    const forIndexing = await describeImagesInMarkdown(raw);
+    const chunks = chunkMarkdown(forIndexing);
 
     if (chunks.length === 0) {
       await db

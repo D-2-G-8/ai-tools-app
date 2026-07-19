@@ -17,10 +17,10 @@ export default async function DocumentViewPage({
   if (!doc) notFound();
 
   const { content, error: contentError } = await loadDocumentContent(doc.blobUrl);
-  // ```bpmn and ```mermaid fenced blocks (see business-requirements-template.ts)
-  // are stored as plain text like everything else, but rendered here as
-  // diagrams -- split them out so only those segments get the diagram
-  // treatment.
+  // ```bpmn / ```mermaid fenced blocks and inline ![alt](src) images (see
+  // business-requirements-template.ts and lib/ingest/images.ts) are stored
+  // as plain text like everything else, but rendered here as diagrams/
+  // pictures -- split them out so only those segments get special treatment.
   const segments = content !== undefined ? splitMarkdownFences(content) : null;
 
   return (
@@ -68,6 +68,18 @@ export default async function DocumentViewPage({
               <BpmnDiagram key={i} xml={segment.content} />
             ) : segment.type === "mermaid" ? (
               <MermaidDiagram key={i} definition={segment.content} />
+            ) : segment.type === "image" ? (
+              <section key={i} className="rounded-lg border border-neutral-200 bg-white p-4">
+                {/* eslint-disable-next-line @next/next/no-img-element -- image
+                    sources here are arbitrary Blob URLs / data URIs supplied
+                    at runtime, not static assets next/image can optimize. */}
+                <img
+                  src={segment.src}
+                  alt={segment.alt || "Embedded image"}
+                  className="max-w-full rounded"
+                />
+                {segment.alt && <p className="mt-2 text-xs text-neutral-400">{segment.alt}</p>}
+              </section>
             ) : segment.content.trim() ? (
               <section key={i} className="rounded-lg border border-neutral-200 bg-white p-5">
                 <pre className="whitespace-pre-wrap break-words font-mono text-sm text-neutral-800">

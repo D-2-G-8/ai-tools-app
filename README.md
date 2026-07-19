@@ -78,6 +78,11 @@ For a rough infrastructure cost estimate under light single-user load, see `PLAN
 - **Single-user mode** — the entire scaffold runs through a single default `workspace`, without login.
   The DB schema is already tied to `workspaceId`, so adding authentication (Clerk/Auth.js) won't require
   reworking the tables.
+- **Embedded-image captioning is best-effort and uncached** — up to 10 images per document are described
+  sequentially by a vision model (`claude-haiku-4-5`) on every ingest (upload, edit-save, or manual
+  reprocess), so a document with several images takes noticeably longer to (re)process; a failed/unreachable/
+  oversized image is skipped rather than failing the ingest. Image Blobs referenced from a document's markdown
+  also aren't tracked anywhere, so deleting a document doesn't clean them up.
 
 ## Project structure
 
@@ -88,7 +93,7 @@ src/
     session.ts      User secrets (cookie, not DB)
     models.ts       Model and pricing catalog
     llm/client.ts   Anthropic client (Vercel AI SDK)
-    ingest/         .md parsing/chunking, embeddings, ingestion pipeline
+    ingest/         .md parsing/chunking, embeddings, image captioning, ingestion pipeline
     tools/          Tool registry, shared contract, default prompts
   app/
     settings/       Settings (GitLab/LLM, per-tool models)
