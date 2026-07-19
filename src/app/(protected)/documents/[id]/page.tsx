@@ -41,7 +41,7 @@ export default async function DocumentViewPage({
   const segments = content !== undefined ? splitMarkdownFences(content) : null;
 
   return (
-    <div className="flex flex-col gap-6 max-w-4xl">
+    <div className="flex flex-col gap-6">
       <div>
         <Link href="/documents" className="text-sm text-neutral-500 hover:underline">
           ← Back to documents
