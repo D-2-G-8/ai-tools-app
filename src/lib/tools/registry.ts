@@ -94,3 +94,19 @@ export const TOOLS: ToolDefinition[] = [
 export function getTool(key: string): ToolDefinition | undefined {
   return TOOLS.find((t) => t.key === key);
 }
+
+/**
+ * Friendly display name for a `run.toolKey`, including toolKeys that have
+ * no entry in TOOLS above (no dedicated tool page of their own) but still
+ * get run rows -- e.g. "design-system-codegen" (src/app/api/design-system/
+ * codegen/[slug]/route.ts). Shared by every place that lists runs by
+ * toolKey (Company page's usage-by-tool table, History's "Tool runs"
+ * table) so a toolKey not in the registry doesn't show up as a raw,
+ * unfriendly string in one place while reading fine in another.
+ */
+export function toolDisplayName(toolKey: string): string {
+  if (toolKey === "documents-qa") return "Documents Q&A";
+  if (toolKey === "document-format") return "Document formatting";
+  if (toolKey === "design-system-codegen") return "Design system code sync";
+  return getTool(toolKey)?.name ?? toolKey;
+}

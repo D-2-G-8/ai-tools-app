@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { run, featureWorkflow } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
-import { getTool } from "@/lib/tools/registry";
+import { getTool, toolDisplayName } from "@/lib/tools/registry";
 import { SetupNotice } from "@/components/setup-notice";
 
 export const dynamic = "force-dynamic";
@@ -102,7 +102,7 @@ export default async function HistoryPage() {
               <tbody>
                 {runs.map((r) => (
                   <tr key={r.id} className="border-b border-neutral-100">
-                    <td className="py-2">{getTool(r.toolKey)?.name ?? r.toolKey}</td>
+                    <td className="py-2">{toolDisplayName(r.toolKey)}</td>
                     <td className="py-2">{r.model}</td>
                     <td className="py-2">
                       {r.inputTokens} / {r.outputTokens}
