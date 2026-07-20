@@ -13,6 +13,7 @@ export default async function MockupEditPage({
   const { id } = await params;
   const m = await loadMockupForWorkspace(id);
   if (!m) notFound();
+  if (!m.blobUrl) notFound(); // Figma reference mockups aren't HTML-editable
 
   const { content, error: contentError } = await loadMockupContent(m.blobUrl);
 

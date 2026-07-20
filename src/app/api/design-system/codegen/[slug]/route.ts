@@ -1,4 +1,5 @@
 import "server-only";
+import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/db/users";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { db } from "@/db";
@@ -37,16 +38,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const { slug } = await params;
   const branch = new URL(request.url).searchParams.get("branch");
   if (!branch) {
-    return Response.json({ ok: false, error: "Missing ?branch= query param." }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Missing ?branch= query param." }, { status: 400 });
   }
 
   const workspaceId = await getCurrentWorkspaceId();
   const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
   if (!ws || ws.designComponentStack === "none") {
-    return Response.json({ ok: false, error: "Code generation is off for this workspace (Settings)." }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Code generation is off for this workspace (Settings)." }, { status: 400 });
   }
   if (ws.designComponentStack !== "react-css-modules") {
-    return Response.json(
+    return NextResponse.json(
       { ok: false, error: `"${ws.designComponentStack}" isn't implemented yet -- only react-css-modules.` },
       { status: 400 },
     );
@@ -58,7 +59,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.slug, slug)))
     .limit(1);
   if (!component) {
-    return Response.json({ ok: false, error: `Component "${slug}" not found.` }, { status: 404 });
+    return NextResponse.json({ ok: false, error: `Component "${slug}" not found.` }, { status: 404 });
   }
 
   await db.update(designComponent).set({ codeSyncStatus: "pending" }).where(eq(designComponent.id, component.id));
@@ -156,7 +157,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       costEstimateUsd: generated.costUsd.toFixed(6),
     });
 
-    return Response.json({ ok: true, componentName: generated.componentName, commitSha: sha });
+    return NextResponse.json({ ok: true, componentName: generated.componentName, commitSha: sha });
   } catch (err) {
     await db.update(designComponent).set({ codeSyncStatus: "failed" }).where(eq(designComponent.id, component.id));
     const message = err instanceof Error ? err.message : String(err);
@@ -175,6 +176,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       errorMessage: message.slice(0, 2000),
     });
 
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }

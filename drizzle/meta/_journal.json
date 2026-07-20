@@ -78,6 +78,13 @@
       "when": 1784555661379,
       "tag": "0010_add_component_is_icon",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1784584401576,
+      "tag": "0011_sour_psynapse",
+      "breakpoints": true
     }
   ]
 }

@@ -118,3 +118,30 @@ export async function getFileNodes<T>(fileKey: string, nodeIds: string[], access
   const ids = encodeURIComponent(nodeIds.join(","));
   return figmaGet<T>(`/files/${fileKey}/nodes?ids=${ids}&geometry=paths`, accessToken, FIGMA_FILE_FETCH_TIMEOUT_MS);
 }
+
+interface FigmaImagesResponse {
+  images: Record<string, string | null>;
+  err?: string | null;
+}
+
+/**
+ * GET /v1/images/:key -- renders the given nodes and returns a map of
+ * nodeId -> a short-lived download URL (or null if that node couldn't render).
+ * Used to capture a screenshot of an app SCREEN imported from Figma as a
+ * reference mockup. `scale` 2 gives a crisp preview; `format` defaults to png.
+ */
+export async function getFileImages(
+  fileKey: string,
+  nodeIds: string[],
+  accessToken: string,
+  { format = "png", scale = 2 }: { format?: "png" | "svg" | "jpg"; scale?: number } = {},
+): Promise<Record<string, string | null>> {
+  const ids = encodeURIComponent(nodeIds.join(","));
+  const res = await figmaGet<FigmaImagesResponse>(
+    `/images/${fileKey}?ids=${ids}&format=${format}&scale=${scale}`,
+    accessToken,
+    FIGMA_FILE_FETCH_TIMEOUT_MS,
+  );
+  if (res.err) throw new Error(`Figma image render failed: ${res.err}`);
+  return res.images ?? {};
+}

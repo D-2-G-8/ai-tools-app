@@ -530,12 +530,24 @@ export const designComponent = pgTable(
 export const mockupStatusValues = ["ready", "error"] as const;
 export type MockupStatus = (typeof mockupStatusValues)[number];
 
+// Where a mockup came from:
+//  "manual" -- uploaded/edited HTML (the original flow).
+//  "ai"     -- AI-generated from the design system (+ figma reference mockups).
+//  "figma"  -- an existing app SCREEN imported from Figma as a historical
+//              reference: a screenshot + a distilled structure spec + which
+//              design-system components it uses. Re-imported by the "Sync
+//              mockups from Figma" button (designers keep doing complex work in
+//              Figma). These ground AI mockup generation on the real product.
+export const mockupSourceValues = ["manual", "ai", "figma"] as const;
+export type MockupSource = (typeof mockupSourceValues)[number];
+
 /**
- * A design mockup: a self-contained HTML page built from Design System
- * tokens/components (see docs/conventions-equivalent notes). Mirrors the
- * Blob-backed storage approach of `document` (src/app/documents), but kept
- * as its own table since mockups render as live HTML rather than being
- * chunked/embedded for RAG.
+ * A design mockup. Either a self-contained HTML page built from Design System
+ * tokens/components (source "manual"/"ai", stored in Blob like `document`), or
+ * an existing app screen imported from Figma (source "figma": a screenshot in
+ * Blob + a distilled structure + the design-system components it uses). Kept as
+ * its own table since mockups render as live HTML / preview images rather than
+ * being chunked/embedded for RAG.
  */
 export const mockup = pgTable(
   "mockup",
@@ -549,11 +561,30 @@ export const mockup = pgTable(
     }),
     name: varchar("name", { length: 255 }).notNull(),
     filename: varchar("filename", { length: 512 }).notNull(),
-    blobUrl: text("blob_url").notNull(),
+    // The HTML page in Blob -- present for "manual"/"ai" mockups, null for a
+    // "figma" reference (which has previewBlobUrl + structureText instead).
+    blobUrl: text("blob_url"),
+    source: varchar("source", { length: 16 }).notNull().default("manual"),
+    // Figma origin, for re-syncing a "figma" reference mockup.
+    figmaFileKey: text("figma_file_key"),
+    figmaNodeId: text("figma_node_id"),
+    // Screenshot (PNG in Blob) of the imported Figma screen -- the visual
+    // reference AI generation is grounded on.
+    previewBlobUrl: text("preview_blob_url"),
+    // Distilled layout/structure spec of the screen (same distiller as
+    // component codegen), and the design-system component slugs it composes.
+    structureText: text("structure_text"),
+    usesComponents: jsonb("uses_components").$type<string[]>().notNull().default([]),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     status: varchar("status", { length: 32 }).notNull().default("ready"),
     errorMessage: text("error_message"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("mockup_workspace_idx").on(t.workspaceId)],
+  (t) => [
+    index("mockup_workspace_idx").on(t.workspaceId),
+    // Re-sync looks a figma reference up by its source node -- unique so a
+    // re-import updates in place instead of duplicating.
+    uniqueIndex("mockup_workspace_figma_node_idx").on(t.workspaceId, t.figmaNodeId),
+  ],
 );

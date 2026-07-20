@@ -6,6 +6,7 @@ import { getCurrentWorkspaceId } from "@/db/workspace";
 import { SetupNotice } from "@/components/setup-notice";
 import { mockupStatusClass } from "./shared";
 import { uploadMockup, deleteMockup } from "./actions";
+import { SyncFromFigma } from "./sync-from-figma";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -51,6 +52,16 @@ export default async function MockupsPage() {
         </p>
       </section>
 
+      <section className="rounded-lg border border-neutral-200 bg-white p-5">
+        <h2 className="text-sm font-medium text-neutral-700 mb-1">Import screens from Figma (reference mockups)</h2>
+        <p className="mb-3 text-xs text-neutral-400">
+          Pulls existing app screens in as historical reference — a screenshot, the layout structure, and the
+          design-system components each screen uses — to ground AI mockup generation. Re-run any time; it&apos;s an
+          authoritative snapshot of the Figma screens.
+        </p>
+        <SyncFromFigma />
+      </section>
+
       <section>
         <h2 className="text-sm font-medium text-neutral-600 mb-2">Mockups ({mockups.length})</h2>
         {mockups.length === 0 ? (
@@ -62,28 +73,46 @@ export default async function MockupsPage() {
                 key={m.id}
                 className="flex items-center justify-between rounded-lg border border-neutral-200 bg-white p-3 text-sm"
               >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium truncate">{m.name}</span>
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] ${mockupStatusClass[m.status]}`}>
-                      {m.status}
-                    </span>
-                  </div>
-                  <div className="text-xs text-neutral-400">
-                    {m.filename}
-                    {m.status === "error" && m.errorMessage ? ` · ${m.errorMessage}` : ""}
+                <div className="flex min-w-0 items-center gap-3">
+                  {m.previewBlobUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={m.previewBlobUrl}
+                      alt=""
+                      className="h-12 w-12 shrink-0 rounded border border-neutral-200 object-cover"
+                    />
+                  )}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium truncate">{m.name}</span>
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] ${mockupStatusClass[m.status]}`}>
+                        {m.status}
+                      </span>
+                      {m.source === "figma" && (
+                        <span className="rounded bg-purple-50 px-1.5 py-0.5 text-[10px] text-purple-700">figma</span>
+                      )}
+                      {m.usesComponents.length > 0 && (
+                        <span className="text-[10px] text-neutral-400">{m.usesComponents.length} components</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-neutral-400">
+                      {m.filename}
+                      {m.status === "error" && m.errorMessage ? ` · ${m.errorMessage}` : ""}
+                    </div>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
                   <Link href={`/design-system/mockups/${m.id}`} className="text-xs text-neutral-600 hover:underline">
                     View
                   </Link>
-                  <Link
-                    href={`/design-system/mockups/${m.id}/edit`}
-                    className="text-xs text-neutral-600 hover:underline"
-                  >
-                    Edit
-                  </Link>
+                  {m.source !== "figma" && (
+                    <Link
+                      href={`/design-system/mockups/${m.id}/edit`}
+                      className="text-xs text-neutral-600 hover:underline"
+                    >
+                      Edit
+                    </Link>
+                  )}
                   <form action={deleteMockup.bind(null, m.id)}>
                     <button type="submit" className="text-xs text-red-600 hover:underline">
                       Delete

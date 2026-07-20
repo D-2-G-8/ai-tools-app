@@ -7,6 +7,15 @@ import { db } from "@/db";
 import { mockup } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
+import { workspace } from "@/db/schema";
+import { getValidFigmaAccessToken } from "@/lib/figma/client";
+import {
+  parseFigmaNodeId,
+  discoverScreenFrames,
+  syncMockupsFromFigma,
+  type ScreenFrame,
+  type SyncMockupsResult,
+} from "@/lib/design-system-codegen/mockup-sync";
 
 /**
  * Mockups are self-contained .html files (design-system tokens/components
@@ -51,10 +60,46 @@ export async function uploadMockup(formData: FormData) {
   revalidatePath("/design-system/mockups");
 }
 
+/**
+ * Imports existing app screens from Figma as reference mockups. Uses the Figma
+ * frame URLs pasted in `urls` (one per line); if none are given, auto-discovers
+ * screen frames from the file's non-service pages. See mockup-sync.ts.
+ */
+export async function syncMockupsFromFigmaAction(
+  urls: string,
+): Promise<SyncMockupsResult & { error?: string }> {
+  const workspaceId = await getCurrentWorkspaceId();
+  try {
+    const manual: ScreenFrame[] = urls
+      .split(/[\s,]+/)
+      .map((u) => parseFigmaNodeId(u))
+      .filter((id): id is string => Boolean(id))
+      .map((nodeId) => ({ nodeId, name: "" }));
+
+    let frames = manual;
+    if (frames.length === 0) {
+      const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
+      const token = await getValidFigmaAccessToken();
+      if (!ws?.figmaFileKey || !token) throw new Error("Figma isn't connected, and no frame URLs were provided.");
+      frames = await discoverScreenFrames(ws.figmaFileKey, token);
+    }
+    if (frames.length === 0) throw new Error("No screen frames found to import.");
+
+    const result = await syncMockupsFromFigma(workspaceId, frames);
+    revalidatePath("/design-system/mockups");
+    return result;
+  } catch (err) {
+    return { imported: 0, removed: 0, errors: [], error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export async function deleteMockup(id: string) {
   const [row] = await db.select().from(mockup).where(eq(mockup.id, id)).limit(1);
   if (row) {
-    await del(row.blobUrl).catch(() => {});
+    // Clean up whichever Blob objects this mockup owns: the HTML page
+    // (manual/ai) and/or the screenshot (a Figma reference).
+    if (row.blobUrl) await del(row.blobUrl).catch(() => {});
+    if (row.previewBlobUrl) await del(row.previewBlobUrl).catch(() => {});
     await db.delete(mockup).where(eq(mockup.id, id));
   }
   revalidatePath("/design-system/mockups");
@@ -82,7 +127,7 @@ export async function updateMockupContent(id: string, formData: FormData) {
       .set({ blobUrl: blob.url, status: "ready", errorMessage: null, updatedAt: new Date() })
       .where(eq(mockup.id, id));
 
-    await del(previousBlobUrl).catch(() => {});
+    if (previousBlobUrl) await del(previousBlobUrl).catch(() => {});
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await db

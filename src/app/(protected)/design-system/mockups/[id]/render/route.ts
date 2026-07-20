@@ -11,6 +11,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const m = await loadMockupForWorkspace(id);
   if (!m) notFound();
+  if (!m.blobUrl) notFound(); // a Figma reference mockup has a screenshot, not inline HTML
 
   let res: Response;
   try {

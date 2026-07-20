@@ -279,3 +279,20 @@ export async function fetchComponentDesignSpec(
   if (!spec) return null;
   return { spec, uses: [...uses.values()] };
 }
+
+/**
+ * Same distillation as fetchComponentDesignSpec, but for one app SCREEN frame
+ * (a reference mockup imported from Figma) rather than a component. Returns the
+ * screen's layout/structure spec plus the design-system components it composes
+ * (its INSTANCE nodes -> `uses`), which grounds AI mockup generation. There's
+ * no self-slug to exclude (a screen isn't itself a design_component).
+ */
+export async function fetchScreenDesign(
+  fileKey: string,
+  nodeId: string,
+  accessToken: string,
+  tokens: TokenForCss[],
+  index: ComponentIndex,
+): Promise<ComponentDesign | null> {
+  return fetchComponentDesignSpec(fileKey, [nodeId], accessToken, tokens, index, "");
+}
