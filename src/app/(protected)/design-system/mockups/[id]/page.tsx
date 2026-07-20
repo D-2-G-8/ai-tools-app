@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { loadMockupForWorkspace, mockupStatusClass } from "../shared";
+import { RebuildScreenButton } from "./rebuild-screen-button";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,14 @@ export default async function MockupViewPage({
 
       {m.source === "figma" ? (
         <div className="flex flex-col gap-4">
+          <div className="rounded-lg border border-neutral-200 bg-white p-4">
+            <h3 className="mb-1 text-xs font-medium text-neutral-500">Rebuild on the design system</h3>
+            <p className="mb-3 text-xs text-neutral-400">
+              Generate a Storybook story that recreates this screen from the design-system components (grounded on
+              the screenshot + structure), and open a PR in the design-system repo.
+            </p>
+            <RebuildScreenButton mockupId={m.id} />
+          </div>
           {m.previewBlobUrl && (
             <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white p-3">
               {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -7,12 +7,23 @@ import { db } from "@/db";
 import { mockup } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
+import { and } from "drizzle-orm";
+import { designComponent } from "@/db/schema";
+import { getEffectiveModel } from "@/lib/tools/model-settings";
+import { commitFiles } from "@/lib/github/client";
+import { getOrOpenSessionBranch } from "@/lib/design-system-codegen/session";
+import { finishCodeGenSession } from "../settings/codegen-actions";
 import {
   parseFigmaRef,
   syncMockupsFromFigma,
   type FigmaRef,
   type SyncMockupsResult,
 } from "@/lib/design-system-codegen/mockup-sync";
+import {
+  buildComponentCatalog,
+  generateScreenStory,
+  type CatalogComponent,
+} from "@/lib/design-system-codegen/screen-story";
 
 /**
  * Mockups are self-contained .html files (design-system tokens/components
@@ -84,8 +95,72 @@ export async function syncMockupsFromFigmaAction(
   }
 }
 
+/**
+ * Rebuilds a Figma reference screen as a Storybook story composed from the real
+ * design-system components (vision-grounded on the screenshot + structure), and
+ * commits it to the design-system repo. Requires the screen's components to be
+ * generated (committed) so the story can import them.
+ */
+export async function rebuildScreenOnDs(mockupId: string): Promise<{ ok: boolean; prUrl?: string; error?: string }> {
+  const workspaceId = await getCurrentWorkspaceId();
+  try {
+    const [m] = await db
+      .select()
+      .from(mockup)
+      .where(and(eq(mockup.id, mockupId), eq(mockup.workspaceId, workspaceId)))
+      .limit(1);
+    if (!m || m.source !== "figma" || !m.previewBlobUrl) {
+      return { ok: false, error: "Not a Figma reference screen." };
+    }
+
+    const committed = await db
+      .select({
+        slug: designComponent.slug,
+        name: designComponent.name,
+        isIcon: designComponent.isIcon,
+        variants: designComponent.variants,
+        states: designComponent.states,
+      })
+      .from(designComponent)
+      .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.codeSyncStatus, "committed")));
+    if (committed.length === 0) {
+      return { ok: false, error: "No design-system components are generated yet — generate them first." };
+    }
+
+    const model = await getEffectiveModel(workspaceId, "design-system-codegen");
+    const res = await fetch(m.previewBlobUrl, { cache: "no-store" });
+    if (!res.ok) return { ok: false, error: `Couldn't load the screenshot (${res.status}).` };
+    const bytes = new Uint8Array(await res.arrayBuffer());
+
+    const slug = m.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || `screen-${mockupId.slice(0, 8)}`;
+    const story = await generateScreenStory(model, {
+      slug,
+      screenName: m.name,
+      screenshot: { bytes, mediaType: "image/png" },
+      structureText: m.structureText,
+      catalog: buildComponentCatalog(committed as CatalogComponent[]),
+    });
+
+    const branch = await getOrOpenSessionBranch(workspaceId);
+    await commitFiles(branch, `Rebuild screen ${story.storyName} from Figma`, [
+      { path: story.storyPath, content: story.content },
+    ]);
+    const { prUrl } = await finishCodeGenSession(branch);
+
+    revalidatePath("/design-system/mockups");
+    return { ok: true, prUrl };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export async function deleteMockup(id: string) {
-  const [row] = await db.select().from(mockup).where(eq(mockup.id, id)).limit(1);
+  const workspaceId = await getCurrentWorkspaceId();
+  const [row] = await db
+    .select()
+    .from(mockup)
+    .where(and(eq(mockup.id, id), eq(mockup.workspaceId, workspaceId)))
+    .limit(1);
   if (row) {
     // Clean up whichever Blob objects this mockup owns: the HTML page
     // (manual/ai) and/or the screenshot (a Figma reference).
@@ -100,7 +175,12 @@ export async function deleteMockup(id: string) {
 export async function updateMockupContent(id: string, formData: FormData) {
   const content = String(formData.get("content") ?? "");
 
-  const [row] = await db.select().from(mockup).where(eq(mockup.id, id)).limit(1);
+  const workspaceId = await getCurrentWorkspaceId();
+  const [row] = await db
+    .select()
+    .from(mockup)
+    .where(and(eq(mockup.id, id), eq(mockup.workspaceId, workspaceId)))
+    .limit(1);
   if (!row) {
     redirect("/design-system/mockups");
   }
