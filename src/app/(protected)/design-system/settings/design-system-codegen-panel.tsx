@@ -7,9 +7,11 @@ import { startCodeGenSession, finishCodeGenSession } from "./codegen-actions";
 export interface CodegenComponentSummary {
   slug: string;
   name: string;
+  codeSyncStatus: string;
 }
 
 type ComponentStatus = "waiting" | "running" | "done" | "error";
+type RunMode = "idle" | "all" | "failed";
 
 interface ComponentLine {
   slug: string;
@@ -41,52 +43,68 @@ async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T
  */
 export function DesignSystemCodegenPanel({ components }: { components: CodegenComponentSummary[] }) {
   const router = useRouter();
-  const [running, setRunning] = useState(false);
+  const [runMode, setRunMode] = useState<RunMode>("idle");
+  const running = runMode !== "idle";
   const [lines, setLines] = useState<ComponentLine[]>([]);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [prUrl, setPrUrl] = useState<string | null>(null);
 
-  const start = useCallback(async () => {
-    if (running || components.length === 0) return;
-    setRunning(true);
-    setSessionError(null);
-    setPrUrl(null);
-    setLines(components.map((c) => ({ slug: c.slug, name: c.name, status: "waiting" })));
+  // Components whose LAST generation attempt errored (see the codegen
+  // route's catch block, which sets codeSyncStatus: "failed" and never
+  // touches lastCodeSyncAt/lastCodeCommitSha -- so a previously-committed
+  // component that later fails a re-generation still keeps its old code
+  // live, this list is just "worth trying again"). Derived from `components`
+  // (server props), which router.refresh() below keeps current after every
+  // run -- no separate client-side bookkeeping needed.
+  const failedComponents = components.filter((c) => c.codeSyncStatus === "failed");
 
-    try {
-      const { branchName } = await startCodeGenSession();
+  const runComponents = useCallback(
+    async (items: CodegenComponentSummary[], mode: RunMode) => {
+      if (running || items.length === 0) return;
+      setRunMode(mode);
+      setSessionError(null);
+      setPrUrl(null);
+      setLines(items.map((c) => ({ slug: c.slug, name: c.name, status: "waiting" })));
 
-      await runWithConcurrency(components, CONCURRENCY, async (component) => {
-        setLines((prev) => prev.map((l) => (l.slug === component.slug ? { ...l, status: "running" } : l)));
-        try {
-          const res = await fetch(`/api/design-system/codegen/${encodeURIComponent(component.slug)}?branch=${encodeURIComponent(branchName)}`, {
-            method: "POST",
-          });
-          const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; componentName?: string };
-          if (!res.ok || !body.ok) {
+      try {
+        const { branchName } = await startCodeGenSession();
+
+        await runWithConcurrency(items, CONCURRENCY, async (component) => {
+          setLines((prev) => prev.map((l) => (l.slug === component.slug ? { ...l, status: "running" } : l)));
+          try {
+            const res = await fetch(`/api/design-system/codegen/${encodeURIComponent(component.slug)}?branch=${encodeURIComponent(branchName)}`, {
+              method: "POST",
+            });
+            const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; componentName?: string };
+            if (!res.ok || !body.ok) {
+              setLines((prev) =>
+                prev.map((l) => (l.slug === component.slug ? { ...l, status: "error", message: body.error ?? `HTTP ${res.status}` } : l)),
+              );
+              return;
+            }
             setLines((prev) =>
-              prev.map((l) => (l.slug === component.slug ? { ...l, status: "error", message: body.error ?? `HTTP ${res.status}` } : l)),
+              prev.map((l) => (l.slug === component.slug ? { ...l, status: "done", message: body.componentName } : l)),
             );
-            return;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            setLines((prev) => prev.map((l) => (l.slug === component.slug ? { ...l, status: "error", message } : l)));
           }
-          setLines((prev) =>
-            prev.map((l) => (l.slug === component.slug ? { ...l, status: "done", message: body.componentName } : l)),
-          );
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          setLines((prev) => prev.map((l) => (l.slug === component.slug ? { ...l, status: "error", message } : l)));
-        }
-      });
+        });
 
-      const { prUrl: openedPrUrl } = await finishCodeGenSession(branchName);
-      setPrUrl(openedPrUrl);
-      router.refresh();
-    } catch (err) {
-      setSessionError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRunning(false);
-    }
-  }, [running, components, router]);
+        const { prUrl: openedPrUrl } = await finishCodeGenSession(branchName);
+        setPrUrl(openedPrUrl);
+        router.refresh();
+      } catch (err) {
+        setSessionError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setRunMode("idle");
+      }
+    },
+    [running, router],
+  );
+
+  const start = useCallback(() => runComponents(components, "all"), [runComponents, components]);
+  const retryFailed = useCallback(() => runComponents(failedComponents, "failed"), [runComponents, failedComponents]);
 
   const statusLabel: Record<ComponentStatus, string> = {
     waiting: "queued",
@@ -103,14 +121,27 @@ export function DesignSystemCodegenPanel({ components }: { components: CodegenCo
 
   return (
     <div className="flex flex-col gap-2">
-      <button
-        type="button"
-        onClick={start}
-        disabled={running || components.length === 0}
-        className="self-start rounded-md border border-neutral-300 px-4 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {running ? "Generating code..." : "Generate code"}
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={start}
+          disabled={running || components.length === 0}
+          className="self-start rounded-md border border-neutral-300 px-4 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {runMode === "all" ? "Generating code..." : "Generate code"}
+        </button>
+        {failedComponents.length > 0 && (
+          <button
+            type="button"
+            onClick={retryFailed}
+            disabled={running}
+            title={failedComponents.map((c) => c.name).join(", ")}
+            className="self-start rounded-md border border-amber-300 bg-amber-50 px-4 py-1.5 text-sm text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {runMode === "failed" ? "Retrying failed..." : `Retry failed only (${failedComponents.length})`}
+          </button>
+        )}
+      </div>
       {components.length === 0 && !running && (
         <p className="text-xs text-neutral-400">Sync components from Figma first, then generate their code.</p>
       )}

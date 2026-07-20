@@ -28,15 +28,17 @@ export async function loadComponentBySlug(workspaceId: string, slug: string) {
 }
 
 /**
- * Every (non-icon) component's slug + name for a workspace -- drives the
- * "Generate code" client orchestration. Icons are excluded: they're single
- * glyphs, not the kind of component this pipeline generates (a contract
- * with props/variants, a .tsx, a stylesheet, stories) -- see the "Icons"
- * tab (design-system/icons) for those instead.
+ * Every (non-icon) component's slug + name + current code-sync status for a
+ * workspace -- drives the "Generate code" client orchestration. Icons are
+ * excluded: they're single glyphs, not the kind of component this pipeline
+ * generates (a contract with props/variants, a .tsx, a stylesheet,
+ * stories) -- see the "Icons" tab (design-system/icons) for those instead.
+ * codeSyncStatus is included so the panel (design-system-codegen-panel.tsx)
+ * can offer a "Retry failed only" run alongside the full "Generate code" one.
  */
 export async function loadComponentSlugsForWorkspace(workspaceId: string) {
   const rows = await db
-    .select({ slug: designComponent.slug, name: designComponent.name })
+    .select({ slug: designComponent.slug, name: designComponent.name, codeSyncStatus: designComponent.codeSyncStatus })
     .from(designComponent)
     .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.isIcon, false)));
   return rows;

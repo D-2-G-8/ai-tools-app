@@ -192,6 +192,8 @@ interface RawTree {
   sha: string;
 }
 
+const MAX_COMMIT_ATTEMPTS = 5;
+
 /**
  * Commits one or more files to a branch as a single atomic commit, via the
  * Git Data API (blob -> tree -> commit -> ref update) rather than the
@@ -205,6 +207,18 @@ interface RawTree {
  * add/update some paths and remove others, which the "delete a component"
  * flow needs (design-system/components/actions.ts, settings/cleanup-
  * actions.ts) to remove a component's whole file set atomically.
+ *
+ * A "Generate code" session commits several components CONCURRENTLY to the
+ * SAME branch (design-system-codegen-panel.tsx's CONCURRENCY), and git only
+ * allows one fast-forward ref update at a time -- two callers that both
+ * read the branch's tip before either has updated it will build a tree/
+ * commit on the same stale parent, and the second one's ref update is
+ * rejected with 422 "Update is not a fast forward" (confirmed against real
+ * failures: several components failing this way in the same session, with
+ * GitHub's error text verbatim). Blob creation doesn't depend on branch
+ * state, so it happens once outside the loop; the tree/commit/ref-update
+ * (the part that DOES depend on the branch's current tip) retries against
+ * a freshly re-read branch sha on that specific conflict.
  */
 export async function commitFiles(branchName: string, message: string, files: CommitFile[]): Promise<string> {
   const { owner, repo } = getConfig();
@@ -212,13 +226,7 @@ export async function commitFiles(branchName: string, message: string, files: Co
     throw new Error("commitFiles called with zero files.");
   }
 
-  const branchSha = await getBranchSha(branchName);
-  if (!branchSha) {
-    throw new Error(`Branch "${branchName}" doesn't exist -- call getOrCreateBranch first.`);
-  }
-  const parentCommit = await githubFetch<RawCommit>(`/repos/${owner}/${repo}/git/commits/${branchSha}`);
-
-  const entries = await Promise.all(
+  const blobEntries = await Promise.all(
     files.map(async (file) => {
       if (file.content === null) {
         return { path: file.path, sha: null as string | null };
@@ -231,25 +239,45 @@ export async function commitFiles(branchName: string, message: string, files: Co
     }),
   );
 
-  const tree = await githubFetch<RawTree>(`/repos/${owner}/${repo}/git/trees`, {
-    method: "POST",
-    body: JSON.stringify({
-      base_tree: parentCommit.tree.sha,
-      tree: entries.map((e) => ({ path: e.path, mode: "100644", type: "blob", sha: e.sha })),
-    }),
-  });
+  for (let attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
+    const branchSha = await getBranchSha(branchName);
+    if (!branchSha) {
+      throw new Error(`Branch "${branchName}" doesn't exist -- call getOrCreateBranch first.`);
+    }
+    const parentCommit = await githubFetch<RawCommit>(`/repos/${owner}/${repo}/git/commits/${branchSha}`);
 
-  const commit = await githubFetch<RawCommit>(`/repos/${owner}/${repo}/git/commits`, {
-    method: "POST",
-    body: JSON.stringify({ message, tree: tree.sha, parents: [branchSha] }),
-  });
+    const tree = await githubFetch<RawTree>(`/repos/${owner}/${repo}/git/trees`, {
+      method: "POST",
+      body: JSON.stringify({
+        base_tree: parentCommit.tree.sha,
+        tree: blobEntries.map((e) => ({ path: e.path, mode: "100644", type: "blob", sha: e.sha })),
+      }),
+    });
 
-  await githubFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branchName)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ sha: commit.sha }),
-  });
+    const commit = await githubFetch<RawCommit>(`/repos/${owner}/${repo}/git/commits`, {
+      method: "POST",
+      body: JSON.stringify({ message, tree: tree.sha, parents: [branchSha] }),
+    });
 
-  return commit.sha;
+    try {
+      await githubFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branchName)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ sha: commit.sha }),
+      });
+      return commit.sha;
+    } catch (err) {
+      const isFastForwardRace = err instanceof Error && /not a fast forward/i.test(err.message);
+      if (!isFastForwardRace || attempt === MAX_COMMIT_ATTEMPTS) throw err;
+      // Someone else's commit landed on this branch between our read above
+      // and this ref update -- loop around, re-read the (now-moved) branch
+      // tip, and rebuild the tree/commit on top of it.
+      await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + Math.floor(Math.random() * 250));
+    }
+  }
+
+  // Unreachable -- the loop above always either returns or throws on the
+  // last attempt -- but keeps tsc happy about every code path returning.
+  throw new Error("commitFiles: exhausted retry attempts.");
 }
 
 export interface PullRequestInfo {
