@@ -11,6 +11,10 @@ import { inviteMember, revokeInvite } from "./actions";
 function toolDisplayName(toolKey: string): string {
   if (toolKey === "documents-qa") return "Documents Q&A";
   if (toolKey === "document-format") return "Document formatting";
+  // Not in TOOLS (src/lib/tools/registry.ts) -- no dedicated tool page of
+  // its own, but its runs (src/app/api/design-system/codegen/[slug]/route.ts)
+  // still get a run row like every other tool, so this table shows the cost.
+  if (toolKey === "design-system-codegen") return "Design system code sync";
   return getTool(toolKey)?.name ?? toolKey;
 }
 

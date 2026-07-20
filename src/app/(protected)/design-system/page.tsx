@@ -4,6 +4,8 @@ import { designToken, workspace } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { SetupNotice } from "@/components/setup-notice";
+import { clearAllTokens } from "./actions";
+import { ClearAllButton } from "./clear-all-button";
 
 export const dynamic = "force-dynamic";
 
@@ -66,8 +68,17 @@ export default async function DesignTokensPage() {
     );
   }
 
+  const totalTokens = Array.from(byCategory.values()).reduce((sum, list) => sum + list.length, 0);
+
   return (
     <div className="flex flex-col gap-8">
+      <div className="flex justify-end">
+        <ClearAllButton
+          action={clearAllTokens}
+          label="Clear all tokens"
+          confirmText={`Delete all ${totalTokens} token(s) for this workspace? A sync afterwards will repopulate whatever's still actually in the current Figma file.`}
+        />
+      </div>
       {Array.from(byCategory.entries()).map(([category, tokens]) => (
         <section key={category}>
           <h2 className="text-sm font-medium text-neutral-600 mb-3">

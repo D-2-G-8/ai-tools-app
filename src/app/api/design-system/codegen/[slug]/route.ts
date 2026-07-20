@@ -2,7 +2,7 @@ import "server-only";
 import { getCurrentUser } from "@/db/users";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { db } from "@/db";
-import { workspace, designComponent } from "@/db/schema";
+import { workspace, designComponent, run as runTable } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getEffectiveModel } from "@/lib/tools/model-settings";
 import { generateComponentCode, type ComponentForCodegen } from "@/lib/design-system-codegen/component";
@@ -60,8 +60,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
 
   await db.update(designComponent).set({ codeSyncStatus: "pending" }).where(eq(designComponent.id, component.id));
 
+  // Declared outside the try block (not `const model = ...` inside it) so
+  // the catch block below can still record which model a failed attempt
+  // used, if it got that far -- block-scoped consts from inside try aren't
+  // visible in catch.
+  let model: string | undefined;
+
   try {
-    const model = await getEffectiveModel(workspaceId, "design-system-codegen");
+    model = await getEffectiveModel(workspaceId, "design-system-codegen");
     const tokens = await loadTokensForCss(workspaceId);
     const forCodegen: ComponentForCodegen = {
       slug: component.slug,
@@ -84,10 +90,45 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       .set({ codeSyncStatus: "committed", lastCodeSyncAt: new Date(), lastCodeCommitSha: sha })
       .where(eq(designComponent.id, component.id));
 
+    // Same run/toolKey accounting every other tool gets (see
+    // documents/format-actions.ts for the identical pattern) -- so this
+    // shows up in the Company page's company-wide usage-by-tool table and
+    // per-member breakdown, both of which group run rows by toolKey/userId
+    // generically rather than only listing tools from the registry
+    // (src/lib/tools/registry.ts -- "design-system-codegen" is deliberately
+    // NOT registered there, it has no dedicated tool page of its own).
+    await db.insert(runTable).values({
+      workspaceId,
+      toolKey: "design-system-codegen",
+      model,
+      userId: currentUser.id,
+      status: "completed",
+      inputSummary: `Generate ${component.name}`.slice(0, 500),
+      outputSummary: `Committed ${generated.componentName} (${sha.slice(0, 7)})`.slice(0, 500),
+      inputTokens: generated.inputTokens,
+      outputTokens: generated.outputTokens,
+      costEstimateUsd: generated.costUsd.toFixed(6),
+    });
+
     return Response.json({ ok: true, componentName: generated.componentName, commitSha: sha });
   } catch (err) {
     await db.update(designComponent).set({ codeSyncStatus: "failed" }).where(eq(designComponent.id, component.id));
     const message = err instanceof Error ? err.message : String(err);
+
+    // No token counts here -- generateComponentCode throws before returning
+    // anything on failure, same as every other tool's error-path run row
+    // (e.g. documents/format-actions.ts), which also has no partial usage
+    // to record.
+    await db.insert(runTable).values({
+      workspaceId,
+      toolKey: "design-system-codegen",
+      model: model ?? "unknown",
+      userId: currentUser.id,
+      status: "error",
+      inputSummary: `Generate ${component.name}`.slice(0, 500),
+      errorMessage: message.slice(0, 2000),
+    });
+
     return Response.json({ ok: false, error: message }, { status: 500 });
   }
 }

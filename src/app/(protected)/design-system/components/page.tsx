@@ -4,6 +4,10 @@ import { designComponent, workspace } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { SetupNotice } from "@/components/setup-notice";
+import { formatRelativeTime } from "@/lib/format-relative-time";
+import { DeleteComponentButton } from "./delete-component-button";
+import { clearAllComponents } from "./actions";
+import { ClearAllButton } from "../clear-all-button";
 
 export const dynamic = "force-dynamic";
 
@@ -53,23 +57,41 @@ export default async function DesignComponentsPage() {
   }
 
   return (
-    <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="flex flex-col gap-4">
+      <div className="flex justify-end">
+        <ClearAllButton
+          action={clearAllComponents}
+          label="Clear all components"
+          confirmText={`Delete all ${components.length} component(s) for this workspace? A full sync afterwards will repopulate whatever's still actually in the current Figma file.`}
+        />
+      </div>
+      <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
       {components.map((component) => (
-        <li key={component.id}>
+        <li key={component.id} className="relative">
           <Link
             href={`/design-system/components/${component.slug}`}
             className="block rounded-lg border border-neutral-200 bg-white p-4 text-sm hover:border-neutral-300"
           >
-            <div className="font-medium">{component.name}</div>
+            <div className="pr-14 font-medium">{component.name}</div>
             {component.description && (
               <p className="mt-1 line-clamp-2 text-xs text-neutral-400">{component.description}</p>
             )}
             <div className="mt-2 text-xs text-neutral-400">
               {component.variants.length} variants · {component.states.length} states
             </div>
+            {/* Last time metadata sync (full or targeted) confirmed this component still exists in
+                Figma -- see delete-component-button.tsx's doc comment for why this matters before
+                deleting: a row a RECENT sync just confirmed will simply come back on the next sync,
+                while one with an old timestamp here wasn't found by the most recent sync and is safe
+                to remove for good. */}
+            <div className="mt-1 text-xs text-neutral-400">Last synced {formatRelativeTime(component.updatedAt)}</div>
           </Link>
+          <div className="absolute right-3 top-3">
+            <DeleteComponentButton slug={component.slug} name={component.name} stopNavigation />
+          </div>
         </li>
       ))}
-    </ul>
+      </ul>
+    </div>
   );
 }

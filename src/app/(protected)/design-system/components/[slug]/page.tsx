@@ -7,6 +7,7 @@ import { getCurrentWorkspaceId } from "@/db/workspace";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { storybookDefaultStoryId } from "@/lib/design-system-codegen/component";
 import { ResyncComponentButton } from "./resync-component-button";
+import { DeleteComponentButton } from "../delete-component-button";
 
 export const dynamic = "force-dynamic";
 
@@ -45,15 +46,19 @@ export default async function DesignComponentDetailPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
+      <div className="flex items-center justify-between">
         <Link href="/design-system/components" className="text-sm text-neutral-500 hover:underline">
           ← Back to components
         </Link>
+        <DeleteComponentButton slug={component.slug} name={component.name} redirectTo="/design-system/components" />
       </div>
 
       <div>
         <h2 className="text-xl font-semibold">{component.name}</h2>
         {component.description && <p className="mt-1 text-neutral-600">{component.description}</p>}
+        {/* See delete-component-button.tsx's doc comment: a component the most recent Figma sync just
+            confirmed will simply come back on the next sync if deleted -- check this timestamp first. */}
+        <p className="mt-1 text-xs text-neutral-400">Last synced {formatRelativeTime(component.updatedAt)}</p>
       </div>
 
       {component.variants.length > 0 && (
