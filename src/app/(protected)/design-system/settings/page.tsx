@@ -5,7 +5,11 @@ import { getCurrentWorkspaceId } from "@/db/workspace";
 import { getFigmaConnectionStatus } from "@/lib/session";
 import { SetupNotice } from "@/components/setup-notice";
 import { saveDesignSettings, disconnectFigma } from "./actions";
+import { confirmAndMergePendingPr } from "./codegen-actions";
 import { FigmaSyncButton } from "./figma-sync-button";
+import { DesignSystemCodegenPanel } from "./design-system-codegen-panel";
+import { ResyncTokensButton } from "./resync-tokens-button";
+import { loadComponentSlugsForWorkspace } from "@/lib/design-system-codegen/data";
 
 export const dynamic = "force-dynamic";
 // Note: the actual Figma sync (previously a slow Server Action here, hence
@@ -23,7 +27,8 @@ async function loadSettingsData() {
   const workspaceId = await getCurrentWorkspaceId();
   const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
   const figma = await getFigmaConnectionStatus();
-  return { ws, figma };
+  const components = await loadComponentSlugsForWorkspace(workspaceId);
+  return { ws, figma, components };
 }
 
 function FigmaResultBanner({
@@ -68,8 +73,9 @@ export default async function DesignSettingsPage({
     return <SetupNotice error={loadError} />;
   }
 
-  const { ws, figma } = data;
+  const { ws, figma, components } = data;
   const canSync = figma.connected && Boolean(ws.figmaFileKey);
+  const codeSyncEnabled = ws.designComponentStack !== "none";
 
   return (
     <div className="flex flex-col gap-8 max-w-2xl">
@@ -145,9 +151,12 @@ export default async function DesignSettingsPage({
           </button>
         </form>
 
-        <div className="mt-4 border-t border-neutral-100 pt-4">
+        <div className="mt-4 flex flex-col gap-3 border-t border-neutral-100 pt-4">
           {canSync ? (
-            <FigmaSyncButton />
+            <>
+              <FigmaSyncButton />
+              <ResyncTokensButton />
+            </>
           ) : (
             <p className="text-xs text-neutral-400">
               {figma.connected
@@ -156,6 +165,52 @@ export default async function DesignSettingsPage({
             </p>
           )}
         </div>
+      </section>
+
+      <section className="rounded-lg border border-neutral-200 bg-white p-5">
+        <h2 className="text-sm font-medium text-neutral-700 mb-1">Design system code sync</h2>
+        <p className="mb-4 text-xs text-neutral-400">
+          Generates real React + CSS Modules code for each synced component (and a tokens.css from the
+          tokens above) and opens a pull request in the separate{" "}
+          <a
+            href={`https://github.com/${process.env.GITHUB_DESIGN_SYSTEM_REPO ?? "D-2-G-8/design-system"}`}
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            design-system
+          </a>{" "}
+          repo -- nothing merges automatically, review the PR&apos;s CI status and confirm below.
+        </p>
+
+        {ws.designSystemPendingPrUrl && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <span>
+              A pull request is open --{" "}
+              <a href={ws.designSystemPendingPrUrl} target="_blank" rel="noreferrer" className="underline">
+                review it
+              </a>
+              , then confirm once its checks look right.
+            </span>
+            <form action={confirmAndMergePendingPr}>
+              <button
+                type="submit"
+                className="shrink-0 rounded-md bg-amber-900 px-3 py-1 text-xs text-white hover:bg-amber-800"
+              >
+                Confirm &amp; merge
+              </button>
+            </form>
+          </div>
+        )}
+
+        {codeSyncEnabled ? (
+          <DesignSystemCodegenPanel components={components} />
+        ) : (
+          <p className="text-xs text-neutral-400">
+            Set &quot;Component code stack&quot; above to something other than &quot;No component code
+            generation yet&quot; to enable this.
+          </p>
+        )}
       </section>
     </div>
   );

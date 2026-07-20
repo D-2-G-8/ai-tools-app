@@ -169,6 +169,19 @@ export const workspace = pgTable("workspace", {
   designComponentStack: varchar("design_component_stack", { length: 32 })
     .notNull()
     .default("react-css-modules"),
+  // Set when a design-system code-sync session (see src/lib/design-system-codegen/)
+  // opens a pull request in the separate design-system repo; cleared once that PR
+  // is merged or closed. Drives the "Review & confirm" banner in
+  // design-system/settings -- generated code never reaches that repo's base
+  // branch without a person explicitly clicking "Confirm & merge" there.
+  designSystemPendingPrUrl: text("design_system_pending_pr_url"),
+  // The branch backing designSystemPendingPrUrl above -- committing more
+  // files onto an already-open PR means committing onto ITS branch (you
+  // can't commit "into" a PR directly). Lets targeted resyncs ("Resync
+  // this component", "Resync tokens") and a later full "Generate code" run
+  // all land on the same not-yet-merged PR instead of opening parallel
+  // duplicate ones (see src/lib/design-system-codegen/session.ts).
+  designSystemPendingPrBranch: text("design_system_pending_pr_branch"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -454,6 +467,18 @@ export interface DesignComponentState {
   description?: string;
 }
 
+// "never" -- no code generated yet (or designComponentStack is "none").
+// "pending" -- a generation request is in flight (async, see
+//   src/app/api/design-system/codegen/[slug]/route.ts) -- distinct from
+//   "never" so the UI can show "generating..." rather than looking stuck.
+// "committed" -- generated and committed to the design-system repo (whether
+//   or not its PR has been merged yet -- see workspace.designSystemPendingPrUrl
+//   for that).
+// "failed" -- the last generation attempt errored; lastCodeSyncAt/
+//   lastCodeCommitSha keep whatever the previous successful attempt was.
+export const codeSyncStatusValues = ["never", "pending", "committed", "failed"] as const;
+export type CodeSyncStatus = (typeof codeSyncStatusValues)[number];
+
 export const designComponent = pgTable(
   "design_component",
   {
@@ -468,6 +493,12 @@ export const designComponent = pgTable(
     states: jsonb("states").$type<DesignComponentState[]>().notNull().default([]),
     figmaNodeIds: jsonb("figma_node_ids").$type<string[]>().notNull().default([]),
     notes: text("notes"),
+    // React/CSS code generation tracking (src/lib/design-system-codegen/) --
+    // separate from the Figma metadata sync above, see that module's doc
+    // comment for why. Never touched by the metadata-only Figma sync itself.
+    lastCodeSyncAt: timestamp("last_code_sync_at", { withTimezone: true }),
+    lastCodeCommitSha: varchar("last_code_commit_sha", { length: 64 }),
+    codeSyncStatus: varchar("code_sync_status", { length: 16 }).notNull().default("never"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

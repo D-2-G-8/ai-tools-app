@@ -1,4 +1,5 @@
 import "server-only";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { designToken, designComponent, type DesignTokenCategory, type DesignComponentVariant, type DesignComponentState } from "@/db/schema";
 import { figmaGet, FIGMA_FILE_FETCH_TIMEOUT_MS } from "./client";
@@ -624,4 +625,163 @@ export async function syncDesignSystemFromFigma(
   const fast = await tryFastSync(workspaceId, fileKey, accessToken, onProgress);
   if (fast) return fast;
   return syncViaFullFileWalk(workspaceId, fileKey, accessToken, onProgress);
+}
+
+// ---- Targeted resync: single component ----
+
+export interface ComponentResyncResult {
+  name: string;
+  /** Human-readable summary of what changed, for a status line -- e.g.
+   *  "1 added (Size: Large); 1 removed (State: Disabled)." or "No
+   *  variant/state changes." */
+  summary: string;
+}
+
+/**
+ * Re-fetches ONE component's Figma node (figmaNodeIds[0] -- the
+ * component-set node for a set, or the component node itself if
+ * standalone) and diffs its CURRENT children against what's stored,
+ * rather than blindly re-fetching the same child IDs -- this is what
+ * catches a variant added/removed in Figma since the last sync, not just
+ * a changed value on an existing one. Reuses the exact same variant/state
+ * parsing this file's full sync already does (parseVariantName), so the
+ * two paths can't silently drift apart on what counts as a "state" vs a
+ * "variant".
+ *
+ * Updates the DB row in place. Unlike a full sync's buildComponentGroups,
+ * this deliberately does NOT re-slugify from the (possibly renamed) Figma
+ * name -- `slug` is this row's identity anchor (URL, code-sync tracking),
+ * so it's left untouched here; only name/variants/states/figmaNodeIds
+ * change. `notes` and the code-sync tracking columns (codeSyncStatus etc)
+ * are untouched too, same "never clobber" rule as upsertComponent above.
+ *
+ * Used by the component detail page's "Resync this component" action
+ * (design-system/components/[slug]/actions.ts). See also
+ * resyncTokensFromFigma below for "Resync tokens".
+ */
+export async function resyncComponentFromFigma(
+  fileKey: string,
+  accessToken: string,
+  component: {
+    id: string;
+    name: string;
+    figmaNodeIds: string[];
+    variants: DesignComponentVariant[];
+    states: DesignComponentState[];
+  },
+): Promise<ComponentResyncResult> {
+  const primaryNodeId = component.figmaNodeIds[0];
+  if (!primaryNodeId) {
+    throw new Error(`"${component.name}" has no stored Figma node ID to resync from -- run a full sync first.`);
+  }
+
+  const nodes = await fetchNodesBatched(fileKey, accessToken, [primaryNodeId]);
+  const node = nodes.get(primaryNodeId);
+  if (!node) {
+    throw new Error(
+      `Figma node ${primaryNodeId} for "${component.name}" no longer exists -- it may have been deleted or moved in Figma.`,
+    );
+  }
+
+  const isSet = node.type === "COMPONENT_SET" && (node.children?.length ?? 0) > 0;
+  const children = isSet ? (node.children ?? []).map((c) => ({ id: c.id, name: c.name })) : [];
+
+  const variantMap = new Map<string, DesignComponentVariant>();
+  const stateMap = new Map<string, DesignComponentState>();
+  for (const child of children) {
+    const pairs = parseVariantName(child.name);
+    if (!pairs) {
+      variantMap.set(child.name, { name: child.name });
+      continue;
+    }
+    for (const { key, value } of pairs) {
+      if (/state/i.test(key)) {
+        stateMap.set(value, { name: value });
+      } else {
+        const label = `${key}: ${value}`;
+        variantMap.set(label, { name: label });
+      }
+    }
+  }
+
+  const newVariants = Array.from(variantMap.values());
+  const newStates = Array.from(stateMap.values());
+  const newFigmaNodeIds = isSet ? [node.id, ...children.map((c) => c.id)] : [node.id];
+
+  const oldLabels = new Set([...component.variants.map((v) => v.name), ...component.states.map((s) => s.name)]);
+  const newLabels = new Set([...newVariants.map((v) => v.name), ...newStates.map((s) => s.name)]);
+  const added = Array.from(newLabels).filter((l) => !oldLabels.has(l));
+  const removed = Array.from(oldLabels).filter((l) => !newLabels.has(l));
+
+  await db
+    .update(designComponent)
+    .set({ name: node.name, variants: newVariants, states: newStates, figmaNodeIds: newFigmaNodeIds, updatedAt: new Date() })
+    .where(eq(designComponent.id, component.id));
+
+  const summary =
+    added.length === 0 && removed.length === 0
+      ? "No variant/state changes."
+      : [
+          added.length > 0 ? `${added.length} added (${added.join(", ")})` : null,
+          removed.length > 0 ? `${removed.length} removed (${removed.join(", ")})` : null,
+        ]
+          .filter(Boolean)
+          .join("; ") + ".";
+
+  return { name: node.name, summary };
+}
+
+// ---- Targeted resync: tokens only ----
+
+export interface TokensResyncResult {
+  tokensUpserted: number;
+  tokensSkipped: number;
+}
+
+/**
+ * Re-fetches just the Figma styles listing (or, for files that aren't
+ * published libraries, walks the full file for styles only) and upserts
+ * them -- "Resync tokens" on the Settings page, for when only colors/type/
+ * spacing changed and a full sync (which also re-lists every component)
+ * isn't needed. Shares tryFastSync's/syncViaFullFileWalk's exact style
+ * resolution logic so this can't drift from what a full sync would
+ * resolve the same tokens to.
+ */
+export async function resyncTokensFromFigma(
+  workspaceId: string,
+  fileKey: string,
+  accessToken: string,
+): Promise<TokensResyncResult> {
+  const key = encodeURIComponent(fileKey);
+  const stylesRes = await figmaGet<FigmaFileStylesResponse>(`/files/${key}/styles`, accessToken).catch(() => null);
+  const styles = stylesRes?.meta.styles ?? [];
+
+  if (styles.length > 0) {
+    const styleNodes = await fetchNodesBatched(fileKey, accessToken, styles.map((s) => s.node_id));
+    let tokensUpserted = 0;
+    let tokensSkipped = 0;
+    for (const style of styles) {
+      const category = STYLE_TYPE_TO_CATEGORY[style.style_type];
+      const node = styleNodes.get(style.node_id);
+      const value = category && node ? resolveStyleValue(category, node) : undefined;
+      if (category && value) {
+        await upsertToken(workspaceId, style.name, category, value, style.description, style.node_id);
+        tokensUpserted++;
+      } else {
+        tokensSkipped++;
+      }
+    }
+    return { tokensUpserted, tokensSkipped };
+  }
+
+  // Not a published library -- fall back to a full-file walk for styles only
+  // (mirrors syncViaFullFileWalk's tokens phase, without touching components).
+  const file = await figmaGet<FigmaFileResponse>(`/files/${key}`, accessToken, FIGMA_FILE_FETCH_TIMEOUT_MS);
+  const resolvedStyles = resolveStylesFromDocumentTree(file.document, file.styles);
+  for (const [styleId, resolved] of resolvedStyles.entries()) {
+    const meta = file.styles[styleId];
+    await upsertToken(workspaceId, meta.name, resolved.category, resolved.value, meta.description, resolved.figmaNodeId);
+  }
+  const tokensSkipped = Object.keys(file.styles).length - resolvedStyles.size;
+  return { tokensUpserted: resolvedStyles.size, tokensSkipped };
 }

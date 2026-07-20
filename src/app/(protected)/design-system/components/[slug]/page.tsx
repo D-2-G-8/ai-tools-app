@@ -4,8 +4,25 @@ import { db } from "@/db";
 import { designComponent } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
+import { formatRelativeTime } from "@/lib/format-relative-time";
+import { storybookDefaultStoryId } from "@/lib/design-system-codegen/component";
+import { ResyncComponentButton } from "./resync-component-button";
 
 export const dynamic = "force-dynamic";
+
+const CODE_SYNC_STATUS_LABEL: Record<string, string> = {
+  never: "Not generated yet",
+  pending: "Generating...",
+  committed: "Committed",
+  failed: "Last attempt failed",
+};
+
+const CODE_SYNC_STATUS_CLASS: Record<string, string> = {
+  never: "text-neutral-400",
+  pending: "text-neutral-600",
+  committed: "text-emerald-600",
+  failed: "text-red-600",
+};
 
 async function loadComponent(slug: string) {
   const workspaceId = await getCurrentWorkspaceId();
@@ -74,11 +91,86 @@ export default async function DesignComponentDetailPage({
         </section>
       )}
 
+      <section className="rounded-lg border border-neutral-200 bg-white p-5">
+        <h3 className="mb-1 text-sm font-medium text-neutral-700">Design system code</h3>
+        <p className="mb-3 text-xs text-neutral-400">
+          Status:{" "}
+          <span className={CODE_SYNC_STATUS_CLASS[component.codeSyncStatus] ?? "text-neutral-400"}>
+            {CODE_SYNC_STATUS_LABEL[component.codeSyncStatus] ?? component.codeSyncStatus}
+          </span>
+          {component.lastCodeSyncAt && <> -- last generated {formatRelativeTime(component.lastCodeSyncAt)}</>}
+          {component.lastCodeCommitSha && <> (commit {component.lastCodeCommitSha.slice(0, 7)})</>}
+        </p>
+        <ResyncComponentButton slug={component.slug} />
+      </section>
+
+      <DesignSystemPreview slug={component.slug} codeSyncStatus={component.codeSyncStatus} />
+
       {component.figmaNodeIds.length > 0 && (
         <section className="text-xs text-neutral-400">
           Figma node IDs: {component.figmaNodeIds.join(", ")}
         </section>
       )}
     </div>
+  );
+}
+
+/**
+ * Embeds the design-system repo's own Storybook (a separate Vercel
+ * deployment, see README's "Design system code sync" section) rather than
+ * ai-tools-app installing @d-2-g-8/design-system as a live dependency --
+ * avoids bundler/peer-dependency/CSS-module-resolution edge cases for
+ * zero real benefit here. iframe.html?id=... is Storybook's own
+ * standalone-preview URL (no sidebar chrome); the id is fully derivable
+ * from the slug alone (see storybookDefaultStoryId's doc comment) because
+ * generateStories always emits a canonical "Default" story under a
+ * deterministic title. "Open in Storybook" links to the full UI so
+ * someone can browse the component's other variant/state stories too.
+ */
+function DesignSystemPreview({ slug, codeSyncStatus }: { slug: string; codeSyncStatus: string }) {
+  const storybookUrl = process.env.DESIGN_SYSTEM_STORYBOOK_URL?.replace(/\/+$/, "");
+
+  if (!storybookUrl) {
+    return (
+      <section className="rounded-lg border border-neutral-200 bg-white p-5">
+        <h3 className="mb-1 text-sm font-medium text-neutral-700">Storybook preview</h3>
+        <p className="text-xs text-neutral-400">
+          Set DESIGN_SYSTEM_STORYBOOK_URL (see .env.example) once the design-system repo&apos;s Storybook is
+          deployed, to preview this component live here.
+        </p>
+      </section>
+    );
+  }
+
+  if (codeSyncStatus !== "committed") {
+    return (
+      <section className="rounded-lg border border-neutral-200 bg-white p-5">
+        <h3 className="mb-1 text-sm font-medium text-neutral-700">Storybook preview</h3>
+        <p className="text-xs text-neutral-400">Generate this component&apos;s code above to preview it here.</p>
+      </section>
+    );
+  }
+
+  const storyId = storybookDefaultStoryId(slug);
+
+  return (
+    <section className="rounded-lg border border-neutral-200 bg-white p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-medium text-neutral-700">Storybook preview</h3>
+        <a
+          href={`${storybookUrl}/?path=/story/${storyId}`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-neutral-500 hover:underline"
+        >
+          Open in Storybook →
+        </a>
+      </div>
+      <iframe
+        src={`${storybookUrl}/iframe.html?id=${storyId}&viewMode=story`}
+        title={`${slug} Storybook preview`}
+        className="h-64 w-full rounded-md border border-neutral-100"
+      />
+    </section>
   );
 }

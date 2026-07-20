@@ -29,6 +29,10 @@ uploaded documents and project context. At this stage, only `.md` document uploa
   synced from a Figma file via OAuth (`src/lib/figma/`) -- each person connects their own Figma account from
   `/design-system/settings`, independent of the Google account used to sign into the app; see "Figma setup"
   below
+- **Design system code sync**: generates real React + CSS Modules components (and a tokens.css) from the
+  synced Figma data and opens a pull request in a SEPARATE `design-system` repo other UI services install as
+  an npm package -- nothing merges without someone explicitly clicking "Confirm & merge" in Settings; see
+  "Design system code sync" below
 
 ## Running locally
 
@@ -61,6 +65,10 @@ See `.env.example`. In short:
 | `VOYAGE_API_KEY`        | voyageai.com (embeddings, since Claude has no embeddings API of its own)                                              | yes                                                                                                                     |
 | `FIGMA_CLIENT_ID`       | Figma → Settings → Apps → your OAuth app -- see "Figma setup" below                                                    | no, safe to expose                                                                                                     |
 | `FIGMA_CLIENT_SECRET`   | Same place as above                                                                                                    | yes                                                                                                                     |
+| `GITHUB_TOKEN`          | Fine-grained GitHub PAT scoped to the `design-system` repo -- see "Design system code sync" below                     | yes                                                                                                                     |
+| `GITHUB_DESIGN_SYSTEM_REPO` | `owner/repo` of the separate design-system repo, e.g. `D-2-G-8/design-system`                                     | no, safe to expose                                                                                                      |
+| `GITHUB_DESIGN_SYSTEM_BASE_BRANCH` | Defaults to `master` if unset                                                                                | no, safe to expose                                                                                                      |
+| `DESIGN_SYSTEM_STORYBOOK_URL` | URL of the design-system repo's own Storybook deployment -- see "Design system code sync" below              | no, safe to expose                                                                                                      |
 
 The user enters the GitLab token and LLM provider token through the UI (`/settings`) — they are stored only in
 an encrypted cookie for the duration of the browser session and are never persisted anywhere.
@@ -122,6 +130,62 @@ fails with a connection error, just reconnect from Settings. **If you already co
 `library_content:read` was added to this app's requested scopes, reconnect once** ("Disconnect" then
 "Connect Figma" again in Settings) -- an existing session's token was issued under the old, narrower scope
 set and won't pick up the new one on its own.
+
+## Design system code sync
+
+Optional -- builds on the Figma sync above. Where Figma sync stores plain metadata (`design_token`/
+`design_component`), this generates real React + CSS Modules source code from that metadata and commits it
+to a **separate** `design-system` git repo, published as an installable npm package (GitHub Packages) that
+other UI services can build on. `ai-tools-app` itself never imports that package directly -- see "Storybook
+preview" below for how components are shown here instead.
+
+**How it works:**
+
+1. Settings → "Generate code" (or a single component's "Resync this component", or "Resync tokens" for just
+   the token file) generates `tokens.css` deterministically (`src/lib/design-system-codegen/tokens.ts` -- a
+   plain serializer, no LLM) and each component's `.tsx`/`.module.css`/`.stories.tsx` via an LLM
+   (`src/lib/design-system-codegen/component.ts`) -- a schema-friendly "contract" step (prop names, chosen
+   tokens, chosen CSS class names) followed by plain-text generation for the actual source files, all
+   grounded in that same contract so the TSX and stylesheet can't disagree on a class name. A deterministic
+   (no LLM) check then confirms every class the TSX references is actually defined in the stylesheet before
+   anything is committed.
+2. Generated files land on a session branch (`figma-sync-<timestamp>`) in the `design-system` repo via the
+   GitHub REST API (`src/lib/github/client.ts`), and a pull request is opened. A targeted resync (single
+   component or tokens-only) reuses that SAME branch/PR if one is already open, rather than opening a new one
+   each time (`src/lib/design-system-codegen/session.ts`).
+3. **Nothing merges automatically.** The Settings page shows a "Review & confirm" banner with the PR link
+   once one is open -- review its CI status (the `design-system` repo runs its own typecheck/lint/build/
+   Storybook-build on the PR, since a 60s serverless function here can't run that toolchain), then click
+   "Confirm & merge". This is deliberate: generated code is real code other services install, and until sync
+   quality is proven over time, a person confirms before it reaches the base branch (and, via that repo's own
+   publish-on-push workflow, gets published as a new package version).
+
+**Storybook preview:** rather than this app installing `@d-2-g-8/design-system` as a live dependency (bundler/
+peer-dependency/CSS-Modules edge cases for no real benefit), the component detail page embeds an iframe
+pointed at the `design-system` repo's own Storybook (a separate Vercel deployment, `build-storybook` output).
+Generated `.stories.tsx` files always define a canonical `Default` story under a `Components/<Name>` title, so
+the story id -- and therefore the iframe URL -- is fully derivable from the component's slug
+(`storybookDefaultStoryId` in `src/lib/design-system-codegen/component.ts`); no extra DB field needed to track
+it.
+
+**Setup, done once by whoever manages this deployment:**
+
+1. Create the `design-system` repo (see that repo's own README for its scaffold/publish setup) in the same
+   GitHub org.
+2. Create a fine-grained GitHub PAT scoped to ONLY that repo, with **Contents: Read and write** and
+   **Pull requests: Read and write**. Set `GITHUB_TOKEN` and `GITHUB_DESIGN_SYSTEM_REPO` (e.g.
+   `D-2-G-8/design-system`); `GITHUB_DESIGN_SYSTEM_BASE_BRANCH` only needs setting if that repo's base branch
+   isn't `master`.
+3. Deploy the `design-system` repo's Storybook as its own separate Vercel project (`build-storybook` /
+   `storybook-static` output), then set `DESIGN_SYSTEM_STORYBOOK_URL` here to that deployment's URL (no
+   trailing slash). Until this is set, component pages just show a note instead of a live preview -- nothing
+   else depends on it.
+4. Set a workspace's "Component code stack" in Settings to `react-css-modules` (the only implemented option
+   today -- `react-scss` is a selectable-but-unimplemented placeholder, and `none` skips code generation
+   entirely).
+
+This is entirely optional -- if `GITHUB_TOKEN`/`GITHUB_DESIGN_SYSTEM_REPO` are unset, the whole feature is
+skipped and the Design System pages work exactly as they do with Figma sync alone.
 
 ## Deploying to Vercel
 
@@ -255,20 +319,33 @@ src/
     code-review/    AI Review engines -- prompts, v1/v2/v3 review logic, MR-comment formatting
     storage/        File storage driver (Vercel Blob or S3-compatible, picked via STORAGE_DRIVER)
     figma/          Figma OAuth2 (oauth.ts), authenticated REST client (client.ts), and the
-                     file-JSON -> design_token/design_component parser (sync.ts)
+                     file-JSON -> design_token/design_component parser (sync.ts) -- also exports
+                     resyncComponentFromFigma/resyncTokensFromFigma for targeted resyncs
+    github/client.ts    Plain-fetch GitHub REST client (branch/commit/PR/merge) for the design-system
+                     code sync -- Git Data API, not the simpler Contents API, for atomic multi-file commits
+    design-system-codegen/  tokens.ts (deterministic tokens.css serializer), component.ts (LLM component
+                     codegen: contract -> TSX/CSS/stories, deterministic class-name check), data.ts
+                     (DB loaders), session.ts (shared code-sync session branch/PR-reuse logic)
   app/
     sign-in/        Google sign-in page
     onboarding/     Create/join a company (after first sign-in)
     api/auth/[...nextauth]/ Auth.js route handler
     api/figma/oauth/{start,callback}/ Figma OAuth2 redirect + callback (route handlers, not Server Actions --
                      these need to issue real redirects to/from www.figma.com)
+    api/figma/sync/  SSE live-progress metadata sync (see figma-sync-button.tsx)
+    api/design-system/codegen/[slug]/ POST: one component's code generation + GitHub commit, own
+                     maxDuration=60 -- kept out of the metadata sync route on purpose, see that route's
+                     doc comment
     api/health/     Plain 200, used by the Docker HEALTHCHECK -- see "Self-hosted deployment" above
     (protected)/    Everything below requires a signed-in user in a company -- see layout.tsx
       presence-actions.ts  touchPresence() -- refreshes the signed-in user's lastSeenAt
       company/      Member roster (online/last-seen) + owner-only email invites + company-wide usage
       settings/     Settings -- GitLab/LLM (company-wide), model per tool (personal to you)
       documents/    Document upload/status, and per-document edit locking (see [id]/edit/)
-      design-system/ Tokens + components (synced from Figma, see settings/), plus HTML mockups
+      design-system/ Tokens + components (synced from Figma, see settings/), plus HTML mockups.
+                     settings/codegen-actions.ts + design-system-codegen-panel.tsx: full "Generate code"
+                     session + "Confirm & merge". components/[slug]/actions.ts +
+                     resync-component-button.tsx: "Resync this component" + Storybook preview iframe.
       history/      Unfinished features + run log
       tools/[toolKey]/ Runner, "Prompts" tab, and "Stats" tab per tool -- code-review-actions.ts +
                         code-review-panel.tsx special-case AI Review's own UI instead of the generic runner

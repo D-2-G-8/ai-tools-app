@@ -1,0 +1,1 @@
+ALTER TABLE "workspace" ADD COLUMN "design_system_pending_pr_branch" text;

@@ -50,6 +50,20 @@
       "when": 1784499023913,
       "tag": "0006_add_code_review",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784547060867,
+      "tag": "0007_motionless_wolfsbane",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784548922374,
+      "tag": "0008_woozy_payback",
+      "breakpoints": true
     }
   ]
 }
