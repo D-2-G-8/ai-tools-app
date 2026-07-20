@@ -49,7 +49,14 @@ export function describeFigmaError(err: unknown): string {
  */
 export async function getValidFigmaAccessToken(): Promise<string | null> {
   const session = await getSession();
-  if (!session.figmaAccessToken) return null;
+  if (!session.figmaAccessToken) {
+    // Local/CLI fallback: there's no browser OAuth session, but a personal
+    // access token (figd_...) in the environment lets server-side code run
+    // locally (e.g. testing the codegen route) still reach the Figma REST
+    // API. In deployed/production runs this is unset and the session OAuth
+    // token above is used.
+    return process.env.FIGMA_ACCESS_TOKEN ?? null;
+  }
 
   const expiresAt = session.figmaTokenExpiresAt ?? 0;
   if (Date.now() < expiresAt - REFRESH_SKEW_MS) {
@@ -70,12 +77,23 @@ export async function getValidFigmaAccessToken(): Promise<string | null> {
   return session.figmaAccessToken;
 }
 
-/** GET against the Figma REST API with the given bearer token. */
+/**
+ * Figma's two token types need different auth headers: an OAuth access token
+ * goes in `Authorization: Bearer`, but a personal access token (figd_...)
+ * must go in `X-Figma-Token` -- Figma rejects a PAT sent as Bearer with a
+ * 401 ("figd_ tokens must be passed via X-Figma-Token header"). The local
+ * FIGMA_ACCESS_TOKEN fallback above is a PAT, so we route by prefix.
+ */
+function figmaAuthHeaders(token: string): Record<string, string> {
+  return token.startsWith("figd_") ? { "X-Figma-Token": token } : { Authorization: `Bearer ${token}` };
+}
+
+/** GET against the Figma REST API with the given token (OAuth or PAT). */
 export async function figmaGet<T>(path: string, accessToken: string, timeoutMs = FIGMA_FETCH_TIMEOUT_MS): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${FIGMA_API_BASE}${path}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: figmaAuthHeaders(accessToken),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
@@ -86,4 +104,17 @@ export async function figmaGet<T>(path: string, accessToken: string, timeoutMs =
     throw new Error(`Figma API returned ${res.status} for ${path}: ${text.slice(0, 300)}`);
   }
   return res.json() as Promise<T>;
+}
+
+/**
+ * GET /v1/files/:key/nodes -- the full node subtree(s) for the given node
+ * ids. `geometry=paths` includes vector path data so icon/vector nodes are
+ * resolvable. Used by the design-system codegen to feed a component's REAL
+ * Figma design (sizes, fills, radii, layout, typography, structure) into
+ * generation instead of just its variant labels -- see
+ * src/lib/design-system-codegen/figma-node.ts.
+ */
+export async function getFileNodes<T>(fileKey: string, nodeIds: string[], accessToken: string): Promise<T> {
+  const ids = encodeURIComponent(nodeIds.join(","));
+  return figmaGet<T>(`/files/${fileKey}/nodes?ids=${ids}&geometry=paths`, accessToken, FIGMA_FILE_FETCH_TIMEOUT_MS);
 }

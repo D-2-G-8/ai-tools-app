@@ -7,6 +7,9 @@ import { eq, and } from "drizzle-orm";
 import { getEffectiveModel } from "@/lib/tools/model-settings";
 import { generateComponentCode, type ComponentForCodegen } from "@/lib/design-system-codegen/component";
 import { loadTokensForCss } from "@/lib/design-system-codegen/data";
+import { fetchComponentDesignSpec } from "@/lib/design-system-codegen/figma-node";
+import { buildComponentIndex } from "@/lib/design-system-codegen/dependencies";
+import { getValidFigmaAccessToken, describeFigmaError } from "@/lib/figma/client";
 import { commitFiles } from "@/lib/github/client";
 
 export const dynamic = "force-dynamic";
@@ -69,6 +72,46 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   try {
     model = await getEffectiveModel(workspaceId, "design-system-codegen");
     const tokens = await loadTokensForCss(workspaceId);
+
+    // Pull the component's REAL Figma design (sizes, radii, fills, layout,
+    // typography, structure) so generation reproduces it instead of guessing
+    // from variant labels, plus the design-system components it COMPOSES
+    // (INSTANCE nodes -> import & render, not re-implement). Best-effort: if
+    // Figma isn't connected (no token) or the file key is missing, or the
+    // fetch fails, we fall back to label-only generation rather than failing.
+    let designSpec: string | undefined;
+    let uses: { slug: string; componentName: string }[] | undefined;
+    if (ws.figmaFileKey && component.figmaNodeIds.length > 0) {
+      try {
+        const figmaToken = await getValidFigmaAccessToken();
+        if (figmaToken) {
+          // Only committed components are composable -- their code exists to
+          // import. Anything not yet generated stays flattened/inlined. In a
+          // full run the orchestrator generates in dependency order so a
+          // component's dependencies are committed by the time it runs.
+          const committed = await db
+            .select({ slug: designComponent.slug, figmaNodeIds: designComponent.figmaNodeIds, isIcon: designComponent.isIcon })
+            .from(designComponent)
+            .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.codeSyncStatus, "committed")));
+          const index = buildComponentIndex(committed);
+          const design = await fetchComponentDesignSpec(
+            ws.figmaFileKey,
+            component.figmaNodeIds,
+            figmaToken,
+            tokens,
+            index,
+            component.slug,
+          );
+          if (design) {
+            designSpec = design.spec;
+            uses = design.uses.map((u) => ({ slug: u.slug, componentName: u.componentName }));
+          }
+        }
+      } catch (err) {
+        console.warn(`[codegen] Figma design fetch failed for ${slug}, falling back to labels: ${describeFigmaError(err)}`);
+      }
+    }
+
     const forCodegen: ComponentForCodegen = {
       slug: component.slug,
       name: component.name,
@@ -76,6 +119,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       variants: component.variants,
       states: component.states,
       isIcon: component.isIcon,
+      designSpec,
+      uses,
     };
     const generated = await generateComponentCode(model, forCodegen, tokens);
 

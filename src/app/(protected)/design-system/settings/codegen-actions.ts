@@ -2,14 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { designToken, workspace } from "@/db/schema";
+import { designToken, designComponent, workspace } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { commitFiles, openOrUpdatePullRequest, mergePullRequest } from "@/lib/github/client";
-import { getValidFigmaAccessToken } from "@/lib/figma/client";
+import { getValidFigmaAccessToken, describeFigmaError } from "@/lib/figma/client";
 import { resyncTokensFromFigma, resyncComponentsFromFigma } from "@/lib/figma/sync";
 import { generateTokensCss } from "@/lib/design-system-codegen/tokens";
 import { loadTokensForCss } from "@/lib/design-system-codegen/data";
+import { buildComponentIndex, buildDependencyEdges, dependencyClosure, topoLevels } from "@/lib/design-system-codegen/dependencies";
 import { getOrOpenSessionBranch } from "@/lib/design-system-codegen/session";
 
 const SETTINGS_PATH = "/design-system/settings";
@@ -46,6 +47,70 @@ async function commitTokensCss(workspaceId: string, branchName: string): Promise
  * POST /api/design-system/codegen/[slug]?branch=<branchName> once per
  * component with limited concurrency, using the branch name this returns.
  */
+/**
+ * Orders the components about to be generated into dependency LEVELS so a
+ * composite (e.g. Avatar, which instances IconButton/BadgeCount) is generated
+ * only after the components it composes -- otherwise its import would point at
+ * code that doesn't exist yet. The panel runs one level fully before the next.
+ *
+ * Best-effort: if Figma isn't connected or anything fails, returns every slug
+ * in a single level (the old flat behavior) plus an `error` note -- generation
+ * still works, composites just fall back to inlining whatever isn't committed.
+ */
+export async function computeCodegenPlan(slugs: string[]): Promise<{ levels: string[][]; error?: string }> {
+  if (slugs.length === 0) return { levels: [] };
+  try {
+    const workspaceId = await getCurrentWorkspaceId();
+    const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
+    const token = await getValidFigmaAccessToken();
+    if (!ws?.figmaFileKey || !token) return { levels: [slugs] };
+
+    // Index over ALL components so any INSTANCE resolves; order only the run set.
+    const all = await db
+      .select({ slug: designComponent.slug, figmaNodeIds: designComponent.figmaNodeIds, isIcon: designComponent.isIcon })
+      .from(designComponent)
+      .where(eq(designComponent.workspaceId, workspaceId));
+    const runSet = new Set(slugs);
+    const runComponents = all.filter((c) => runSet.has(c.slug));
+
+    const index = buildComponentIndex(all);
+    const edges = await buildDependencyEdges(runComponents, ws.figmaFileKey, token, index);
+    return { levels: topoLevels(slugs, edges) };
+  } catch (err) {
+    return { levels: [slugs], error: describeFigmaError(err) };
+  }
+}
+
+/**
+ * Plan for generating ONE chosen component together with everything it depends
+ * on: the component's dependency closure (itself + all it transitively
+ * composes), ordered into levels (deps first). Powers the per-component
+ * "Generate (with dependencies)" button -- pick Avatar, get Avatar plus
+ * IconButton/BadgeCount/the profile icon, generated in the right order.
+ *
+ * Best-effort like computeCodegenPlan: if Figma isn't connected or anything
+ * fails, falls back to generating just the one component.
+ */
+export async function computeClosurePlan(rootSlug: string): Promise<{ levels: string[][]; error?: string }> {
+  try {
+    const workspaceId = await getCurrentWorkspaceId();
+    const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
+    const token = await getValidFigmaAccessToken();
+    if (!ws?.figmaFileKey || !token) return { levels: [[rootSlug]] };
+
+    const all = await db
+      .select({ slug: designComponent.slug, figmaNodeIds: designComponent.figmaNodeIds, isIcon: designComponent.isIcon })
+      .from(designComponent)
+      .where(eq(designComponent.workspaceId, workspaceId));
+
+    const index = buildComponentIndex(all);
+    const { slugs, edges } = await dependencyClosure(rootSlug, all, ws.figmaFileKey, token, index);
+    return { levels: topoLevels(slugs, edges) };
+  } catch (err) {
+    return { levels: [[rootSlug]], error: describeFigmaError(err) };
+  }
+}
+
 export async function startCodeGenSession(): Promise<{ branchName: string }> {
   const workspaceId = await getCurrentWorkspaceId();
   const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);

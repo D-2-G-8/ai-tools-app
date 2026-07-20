@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getAnthropicClient } from "@/lib/llm/client";
 import { estimateCostUsd } from "@/lib/models";
 import type { DesignComponentVariant, DesignComponentState } from "@/db/schema";
-import type { TokenForCss } from "./tokens";
+import { toCssVarName, type TokenForCss } from "./tokens";
 
 /**
  * Turns one design_component row (+ the workspace's currently-synced
@@ -51,6 +51,23 @@ export interface ComponentForCodegen {
    * instead of "Components/" -- everything else about the pipeline is the same.
    */
   isIcon: boolean;
+  /**
+   * Compact spec of the component's REAL Figma design (per-variant sizes,
+   * radii, fills, layout, typography, structure), distilled from the node
+   * subtree over REST -- see fetchComponentDesignSpec in figma-node.ts. When
+   * present, generation reproduces the actual design instead of guessing from
+   * variant labels. Optional: if the node fetch is unavailable (no Figma
+   * token / file key), generation falls back to label-only, same as before.
+   */
+  designSpec?: string;
+  /**
+   * Design-system components this one COMPOSES -- the design spec marks their
+   * spots as `USE <ComponentName>`. The generated TSX imports each from its
+   * sibling module (`../<slug>`) and renders it, instead of re-implementing
+   * it. These must already be generated (the codegen orchestrator emits them
+   * in dependency order -- see dependencies.ts).
+   */
+  uses?: { slug: string; componentName: string }[];
 }
 
 export interface GeneratedComponentFiles {
@@ -92,14 +109,17 @@ const contractSchema = z.object({
     .array(z.string())
     .describe(
       "CSS Modules class names this component's stylesheet will define and the TSX will reference via " +
-        "styles.<name>. MUST be camelCase with no hyphens (e.g. \"buttonPrimary\", not \"button-primary\") " +
-        "so the TSX and CSS reference the exact same identifier.",
+        "styles.<name>. MUST be camelCase single identifiers -- NO hyphens, NO BEM `--`/`__` (e.g. " +
+        '"buttonPrimary", never "button-primary", "avatar--24", or "avatar__container"). The TSX accesses ' +
+        "them as styles.<name> (dot), which is invalid for hyphenated names, so every variant/size/state must " +
+        "be its OWN camelCase class here (e.g. sizeSm, sizeMd, typeIcon, squared, withBadge) -- never a " +
+        "hyphenated or BEM modifier. TSX and CSS both copy this exact list character-for-character.",
     ),
 });
 
 type ComponentContract = z.infer<typeof contractSchema>;
 
-function pascalCase(slug: string): string {
+export function pascalCase(slug: string): string {
   return slug
     .split(/[-_\s]+/)
     .filter(Boolean)
@@ -135,7 +155,7 @@ export function componentSourcePaths(slug: string, isIcon: boolean): ComponentSo
     dir,
     componentName,
     tsxPath: `${dir}/${componentName}.tsx`,
-    cssPath: `${dir}/${componentName}.module.css`,
+    cssPath: `${dir}/${componentName}.module.scss`,
     storiesPath: `${dir}/${componentName}.stories.tsx`,
     indexPath: `${dir}/index.ts`,
   };
@@ -149,6 +169,15 @@ function describeComponent(component: ComponentForCodegen): string {
     component.description ? `Description: ${component.description}` : "",
     variantLines.length ? `Variants (from Figma):\n${variantLines.join("\n")}` : "No variants.",
     stateLines.length ? `States (from Figma):\n${stateLines.join("\n")}` : "No states.",
+    // The real design, distilled from the Figma node subtree. This is the
+    // source of truth for the implementation -- exact px sizes, corner radii,
+    // fill colors, auto-layout, and typography per variant. When present,
+    // reproduce it faithfully; do NOT invent dimensions/colors/structure.
+    component.designSpec
+      ? "Actual Figma design (REPRODUCE THIS EXACTLY -- indentation = node nesting; " +
+        "WxH in px, radius/gap/pad in px, fill/stroke are CSS colors, font:{...} is typography):\n" +
+        component.designSpec
+      : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -203,12 +232,20 @@ async function generateTsx(
       "",
       `Component name: ${componentName}`,
       `Props:\n${contract.props.map((p) => `- ${p.name}: ${p.type}${p.description ? ` -- ${p.description}` : ""}`).join("\n")}`,
-      `CSS Modules class names available (import from "./${componentName}.module.css" as \`styles\`, reference ONLY via styles.<name>, exactly these names): ${contract.classNames.join(", ")}`,
+      `CSS Modules class names available (import from "./${componentName}.module.scss" as \`styles\`, reference ONLY via styles.<name>, exactly these names): ${contract.classNames.join(", ")}`,
+      component.uses && component.uses.length > 0
+        ? "\nThis component COMPOSES other design-system components -- the design spec marks their spots as " +
+          "`USE <Name>`. For each, IMPORT it from its sibling module and RENDER it there; do NOT re-implement its " +
+          "markup/SVG/styles. Available components (import name from path):\n" +
+          component.uses.map((u) => `- import { ${u.componentName} } from "../${u.slug}";`).join("\n") +
+          "\nPass the instance's props(...) from the spec through to the component's props as sensible."
+        : "",
       "",
       "Requirements:",
       `- Named export \`${componentName}\`, plus an exported \`${componentName}Props\` interface.`,
+      "- If an \"Actual Figma design\" block is given above, reproduce its DOM structure and per-variant behavior faithfully (the same nesting of container/content/badge elements, the same size/type/state branching) -- don't invent a different structure.",
       "- Extend the appropriate native HTML element attributes type where sensible (e.g. ButtonHTMLAttributes for a button).",
-      "- Reference styles ONLY via styles.<name> using the exact class names listed above -- never invent a class name, never use inline styles, never hardcode a color/size value.",
+      "- Reference styles ONLY via styles.<name>, copying each class name from the list above character-for-character (they are camelCase, so always dot access `styles.foo` -- never `styles['a-b']`, never a name not in the list). Never invent a class, never use inline styles, never hardcode a color/size value.",
       "- No default export.",
     ].join("\n"),
   });
@@ -234,14 +271,17 @@ async function generateCss(
   const result = await generateText({
     model: anthropic(model),
     system:
-      "You write CSS Modules stylesheets for a shared component library. Output ONLY the raw .module.css " +
-      "file contents -- no markdown code fences, no explanation before or after.",
+      "You write CSS Modules stylesheets in SCSS syntax for a shared component library. Output ONLY the raw " +
+      ".module.scss file contents -- no markdown code fences, no explanation before or after. Valid SCSS " +
+      "(nesting, &-modifiers, etc.) is allowed and encouraged, but every class the component references must " +
+      "still resolve to a top-level exported class name.",
     prompt: [
       describeComponent(component),
       "",
-      `Define EXACTLY these top-level class selectors, no more, no fewer, all camelCase (e.g. .buttonPrimary): ${contract.classNames.join(", ")}`,
-      `Reference values ONLY via var(--token-name) using these tokens (never a hardcoded color/size/shadow value, never a token not in this list):`,
-      chosenTokens.map((t) => `- --${t.name} (${t.category}): ${t.value}`).join("\n") || "(no tokens chosen)",
+      `Write a rule for EVERY one of these class names, copied character-for-character, all camelCase (e.g. .buttonPrimary) -- do NOT rename to kebab-case or BEM, do NOT add or drop any, and do NOT leave any without its own selector (even a boolean/marker modifier like .withBadge MUST get a rule, even if minimal): ${contract.classNames.join(", ")}. You MAY additionally combine them in compound/nested selectors (e.g. \`.squared.sizeMd\`, \`.avatar .badge\`) for variant-specific rules, but every class token used must be one of these exact names.`,
+      "If an \"Actual Figma design\" block is given above, match its exact px dimensions, corner radii, gaps/padding, and per-variant typography -- these are the real measured values, use them.",
+      `Reference color/shadow values ONLY via the EXACT var() names below (they match the generated tokens.css; CSS custom properties are case-sensitive, so copy each var(--...) verbatim). Never a hardcoded color/shadow value, never a token not in this list; px sizes/radii/gaps from the design block are written directly:`,
+      chosenTokens.map((t) => `- var(--${toCssVarName(t.name)}) (${t.category}) = ${t.value}`).join("\n") || "(no tokens chosen)",
     ].join("\n"),
   });
   return {
@@ -297,6 +337,14 @@ async function generateStories(
         "canonical story the component detail page embeds. Beyond that, add one story per meaningfully " +
         "distinct variant/state combination -- don't enumerate every possible cross-product if that would " +
         "be excessive, use judgment for what's useful to preview.",
+      "",
+      "Import ONLY from \"./" +
+        componentName +
+        "\" -- do NOT import any other package (no icon libraries like react-icons, @heroicons, lucide, etc.; " +
+        "they are NOT dependencies and break the Storybook build). For a ReactNode/icon-typed prop, pass a small " +
+        "inline `<svg width={16} height={16}>...</svg>` or omit it. In args/argTypes use ONLY the exact literal " +
+        "values from the prop types above (e.g. if `size: \"24\" | \"32\"`, the control options are \"24\"/\"32\", " +
+        "never invented ones like \"sm\"/\"md\").",
       "",
       `ALWAYS import the component under the alias "Component", exactly as shown above (\`import { ${componentName} as Component } from "./${componentName}"\`) -- ` +
         "never under its own bare name. A story is always exported as `Default`, and some components may also " +

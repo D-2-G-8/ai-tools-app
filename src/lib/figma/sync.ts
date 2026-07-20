@@ -1,5 +1,5 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { designToken, designComponent, type DesignTokenCategory, type DesignComponentVariant, type DesignComponentState } from "@/db/schema";
 import { figmaGet, FIGMA_FILE_FETCH_TIMEOUT_MS } from "./client";
@@ -342,8 +342,32 @@ interface ResolvedComponentGroup {
  * report back, versus silently guessing wrong forever.
  */
 function isLikelyIconName(name: string, pageLabel: string | undefined): boolean {
-  if (pageLabel && /icon/i.test(pageLabel)) return true;
-  return name.includes("/");
+  // Match a page literally named "Icons"/"Icon" (word-boundary) -- NOT a
+  // substring, so a component whose page is "ButtonIcon" (that's IconButton!)
+  // isn't mistaken for an icon.
+  if (pageLabel && /\bicons?\b/i.test(pageLabel)) return true;
+  // A "/"-hierarchical name is the icon-library convention (Outline/Bold/Plus,
+  // Fill/Profile2) -- BUT Figma's own variant-name syntax is "Key=Value,
+  // Key2=Value2", and a value can itself contain "/" (e.g. a real component's
+  // variant "Type=Number, ..., Filter/Sort=Off"). Those are NOT icons, so a
+  // name that contains "=" is a variant name, never an icon.
+  return name.includes("/") && !name.includes("=");
+}
+
+// Curated design-system components are marked with a leading "🟢" in this
+// Figma file. The marker is on the top-level SET (or standalone component)
+// with a simple name ("🟢 Avatar"); individual published variants/showcase
+// copies get a "/"-path name ("🟢 Avatar/Dark/40 px/Img/Off") and are NOT
+// real components -- so a curated component is "🟢" AND has no "/".
+const CURATION_MARKER = "🟢";
+
+function stripCurationMarker(name: string): string {
+  return name.replace(/^\s*🟢\s*/u, "").trim();
+}
+
+function isCuratedComponentName(name: string): boolean {
+  const trimmed = name.trim();
+  return trimmed.startsWith(CURATION_MARKER) && !stripCurationMarker(trimmed).includes("/");
 }
 
 function slugKeyFor(name: string): string {
@@ -451,11 +475,18 @@ function buildComponentGroups(
     return slug;
   };
 
-  return order.map((key) => {
-    const group = byName.get(key)!;
-    group.slug = uniqueSlug(slugify(group.name));
-    return group;
-  });
+  return order
+    .map((key) => byName.get(key)!)
+    // Keep only real design-system components (curated with "🟢") and icons.
+    // Drops the ~1900 noise entries Figma's library endpoints return --
+    // individually-published variants, showcase/documentation copies, and
+    // internal/deprecated components -- which is what bloated the list to 646.
+    .filter((group) => group.isIcon || isCuratedComponentName(group.name))
+    .map((group) => {
+      group.slug = uniqueSlug(slugify(group.name));
+      group.name = stripCurationMarker(group.name); // store the clean display name, without the marker
+      return group;
+    });
 }
 
 // ---- DB upserts (shared by both paths) ----
@@ -592,6 +623,25 @@ async function upsertComponentGroups(
     componentsUpserted++;
     onProgress({ phase: "components", done: i + 1, total: groups.length });
   }
+
+  // Reconcile: design_component is a SNAPSHOT of Figma, so drop rows that are
+  // no longer in the synced set (e.g. previously over-captured noise now that
+  // the curation filter is in place). Guarded on a non-empty sync so a
+  // transient empty result can never wipe the whole table.
+  if (groups.length > 0) {
+    const keptSlugs = new Set(groups.map((g) => g.slug));
+    const existing = await db
+      .select({ id: designComponent.id, slug: designComponent.slug })
+      .from(designComponent)
+      .where(eq(designComponent.workspaceId, workspaceId));
+    const staleIds = existing.filter((e) => !keptSlugs.has(e.slug)).map((e) => e.id);
+    if (staleIds.length > 0) {
+      await db
+        .delete(designComponent)
+        .where(and(eq(designComponent.workspaceId, workspaceId), inArray(designComponent.id, staleIds)));
+    }
+  }
+
   return componentsUpserted;
 }
 

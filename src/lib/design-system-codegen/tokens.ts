@@ -20,12 +20,19 @@ export interface TokenForCss {
 
 const CATEGORY_ORDER: DesignTokenCategory[] = ["color", "typography", "spacing", "radius", "shadow", "duration", "other"];
 
-/** "Text Primary" / "text_primary" -> "text-primary". Same convention as
- *  Figma sync's own slugify (src/lib/figma/sync.ts), kept local here since
- *  the fallback-on-empty behavior differs (a token can't fall back to a
- *  generic name the way a component slug does -- an empty/unusable token
- *  name means the token should be skipped, not silently renamed). */
-function toCssVarName(name: string): string {
+/** "Text Primary" / "text_primary" / "Label/Light/primary" -> "text-primary"
+ *  / "label-light-primary". Same convention as Figma sync's own slugify
+ *  (src/lib/figma/sync.ts), kept local here since the fallback-on-empty
+ *  behavior differs (a token can't fall back to a generic name the way a
+ *  component slug does -- an empty/unusable token name means the token
+ *  should be skipped, not silently renamed).
+ *
+ *  Exported because component codegen MUST reference tokens by the SAME
+ *  sanitized name this emits into tokens.css -- CSS custom properties are
+ *  case-sensitive, so feeding the model the raw Figma name ("Label/Light/
+ *  primary") makes it write var(--Label-Light-primary), which never resolves
+ *  against tokens.css's --label-light-primary. */
+export function toCssVarName(name: string): string {
   return name
     .toLowerCase()
     .trim()

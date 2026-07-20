@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
-import { startCodeGenSession, finishCodeGenSession } from "./codegen-actions";
+import { startCodeGenSession, finishCodeGenSession, computeCodegenPlan } from "./codegen-actions";
 
 export interface CodegenComponentSummary {
   slug: string;
@@ -69,7 +69,13 @@ export function DesignSystemCodegenPanel({ components }: { components: CodegenCo
       try {
         const { branchName } = await startCodeGenSession();
 
-        await runWithConcurrency(items, CONCURRENCY, async (component) => {
+        // Order into dependency levels so a composite (e.g. Avatar) is generated
+        // only after the components it composes -- and generate one full level
+        // (in parallel) before the next, so those imports point at committed code.
+        const bySlug = new Map(items.map((c) => [c.slug, c]));
+        const { levels } = await computeCodegenPlan(items.map((c) => c.slug));
+
+        const runOne = async (component: CodegenComponentSummary) => {
           setLines((prev) => prev.map((l) => (l.slug === component.slug ? { ...l, status: "running" } : l)));
           try {
             const res = await fetch(`/api/design-system/codegen/${encodeURIComponent(component.slug)}?branch=${encodeURIComponent(branchName)}`, {
@@ -89,7 +95,13 @@ export function DesignSystemCodegenPanel({ components }: { components: CodegenCo
             const message = err instanceof Error ? err.message : String(err);
             setLines((prev) => prev.map((l) => (l.slug === component.slug ? { ...l, status: "error", message } : l)));
           }
-        });
+        };
+
+        // Barrier between levels; parallel (bounded) within a level.
+        for (const level of levels) {
+          const levelItems = level.map((slug) => bySlug.get(slug)).filter((c): c is CodegenComponentSummary => Boolean(c));
+          await runWithConcurrency(levelItems, CONCURRENCY, runOne);
+        }
 
         const { prUrl: openedPrUrl } = await finishCodeGenSession(branchName);
         setPrUrl(openedPrUrl);

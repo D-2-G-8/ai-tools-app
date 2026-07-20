@@ -8,6 +8,7 @@ import { formatRelativeTime } from "@/lib/format-relative-time";
 import { figmaNodeUrl } from "@/lib/figma/links";
 import { storybookDefaultStoryId } from "@/lib/design-system-codegen/component";
 import { ResyncComponentButton } from "./resync-component-button";
+import { GenerateWithDepsButton } from "./generate-with-deps-button";
 import { DeleteComponentButton } from "../delete-component-button";
 
 export const dynamic = "force-dynamic";
@@ -113,6 +114,9 @@ export default async function DesignComponentDetailPage({
           {component.lastCodeSyncAt && <> -- last generated {formatRelativeTime(component.lastCodeSyncAt)}</>}
           {component.lastCodeCommitSha && <> (commit {component.lastCodeCommitSha.slice(0, 7)})</>}
         </p>
+        <div className="mb-3">
+          <GenerateWithDepsButton slug={component.slug} name={component.name} />
+        </div>
         <ResyncComponentButton slug={component.slug} />
         <div className="mt-3 border-t border-neutral-100 pt-3">
           <DeleteComponentButton
