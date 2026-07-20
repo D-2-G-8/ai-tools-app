@@ -64,6 +64,13 @@
       "when": 1784548922374,
       "tag": "0008_woozy_payback",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784554636238,
+      "tag": "0009_add_token_code_sync",
+      "breakpoints": true
     }
   ]
 }

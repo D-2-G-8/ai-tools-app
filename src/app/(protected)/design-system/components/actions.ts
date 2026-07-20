@@ -5,6 +5,17 @@ import { db } from "@/db";
 import { designComponent } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
+import { componentSourcePaths } from "@/lib/design-system-codegen/component";
+import { getOrOpenSessionBranch } from "@/lib/design-system-codegen/session";
+import { commitFiles } from "@/lib/github/client";
+import { finishCodeGenSession } from "../settings/codegen-actions";
+
+export interface DeleteComponentResult {
+  ok: boolean;
+  error?: string;
+  /** Set when this component's code also had to be removed from the design-system repo. */
+  prUrl?: string;
+}
 
 /**
  * Deletes a design_component row (see delete-component-button.tsx).
@@ -13,33 +24,55 @@ import { getCurrentWorkspaceId } from "@/db/workspace";
  * deletes -- see that file's upsertComponent. If this component's Figma
  * node still exists in the currently-synced file, the NEXT full sync (or a
  * targeted "Resync this component" for it, though you obviously can't
- * click that once it's gone) will just recreate the row, since sync has no
- * memory of "a person deleted this on purpose". This only permanently
- * removes rows that are no longer found by sync -- see the "last synced"
- * timestamp on the components list, which flags rows the most recent full
- * sync didn't touch (orphaned -- won't come back) vs ones it just
- * confirmed (still live in Figma -- deleting it here is temporary; the
- * real fix is cleaning it up in Figma itself).
+ * click that once it's gone) will just recreate the platform row, since
+ * sync has no memory of "a person deleted this on purpose" -- see the
+ * "last synced" timestamp, which flags rows the most recent sync didn't
+ * touch (orphaned -- won't come back) vs ones it just confirmed.
+ *
+ * If code has already been generated for this component (codeSyncStatus
+ * === "committed" -- it's real code living in the design-system repo that
+ * other services may already depend on), a plain DB delete isn't enough:
+ * this also commits a removal of its file set (componentSourcePaths) to
+ * the workspace's current code-sync branch and opens/updates the PR --
+ * same human-in-the-loop merge as every other code-sync write (see
+ * src/lib/github/client.ts's mergePullRequest doc comment). The DB row is
+ * only deleted AFTER that commit succeeds, so a GitHub-side failure
+ * leaves the platform row intact rather than silently going out of sync
+ * with the repo.
  */
-export async function deleteComponent(slug: string): Promise<void> {
+export async function deleteComponent(slug: string): Promise<DeleteComponentResult> {
   const workspaceId = await getCurrentWorkspaceId();
-  await db
-    .delete(designComponent)
-    .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.slug, slug)));
+  const [component] = await db
+    .select()
+    .from(designComponent)
+    .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.slug, slug)))
+    .limit(1);
+  if (!component) return { ok: true }; // already gone -- nothing to do
 
+  if (component.codeSyncStatus === "committed") {
+    try {
+      const paths = componentSourcePaths(component.slug);
+      const branchName = await getOrOpenSessionBranch(workspaceId);
+      await commitFiles(branchName, `Remove ${paths.componentName}`, [
+        { path: paths.tsxPath, content: null },
+        { path: paths.cssPath, content: null },
+        { path: paths.storiesPath, content: null },
+        { path: paths.indexPath, content: null },
+      ]);
+      const { prUrl } = await finishCodeGenSession(branchName);
+
+      await db.delete(designComponent).where(eq(designComponent.id, component.id));
+      revalidatePath("/design-system/components");
+      revalidatePath(`/design-system/components/${slug}`);
+      revalidatePath("/design-system/settings");
+      return { ok: true, prUrl };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  await db.delete(designComponent).where(eq(designComponent.id, component.id));
   revalidatePath("/design-system/components");
   revalidatePath(`/design-system/components/${slug}`);
-}
-
-/**
- * Deletes every design_component row for this workspace -- for when
- * duplicates/stale rows have piled up enough that sorting out
- * individually what's garbage (see deleteComponent above) isn't worth it.
- * Run a full sync afterwards to repopulate whatever's actually still in
- * the current Figma file.
- */
-export async function clearAllComponents(): Promise<void> {
-  const workspaceId = await getCurrentWorkspaceId();
-  await db.delete(designComponent).where(eq(designComponent.workspaceId, workspaceId));
-  revalidatePath("/design-system/components");
+  return { ok: true };
 }

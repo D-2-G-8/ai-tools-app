@@ -35,3 +35,30 @@ export async function loadComponentSlugsForWorkspace(workspaceId: string) {
     .where(eq(designComponent.workspaceId, workspaceId));
   return rows;
 }
+
+/**
+ * Counts for design-system/settings's Cleanup section -- how many
+ * components/tokens are metadata-only vs already committed to the
+ * design-system repo, since bulk-clearing each bucket does something
+ * different (see settings/cleanup-actions.ts).
+ */
+export async function loadCleanupCounts(workspaceId: string) {
+  const components = await db
+    .select({ codeSyncStatus: designComponent.codeSyncStatus })
+    .from(designComponent)
+    .where(eq(designComponent.workspaceId, workspaceId));
+  const tokens = await db
+    .select({ lastCodeSyncAt: designToken.lastCodeSyncAt })
+    .from(designToken)
+    .where(eq(designToken.workspaceId, workspaceId));
+
+  const componentsCodeSynced = components.filter((c) => c.codeSyncStatus === "committed").length;
+  const tokensCodeSynced = tokens.filter((t) => t.lastCodeSyncAt !== null).length;
+
+  return {
+    componentsUnsynced: components.length - componentsCodeSynced,
+    componentsCodeSynced,
+    tokensUnsynced: tokens.length - tokensCodeSynced,
+    tokensCodeSynced,
+  };
+}

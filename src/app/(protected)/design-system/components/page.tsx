@@ -6,8 +6,6 @@ import { getCurrentWorkspaceId } from "@/db/workspace";
 import { SetupNotice } from "@/components/setup-notice";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { DeleteComponentButton } from "./delete-component-button";
-import { clearAllComponents } from "./actions";
-import { ClearAllButton } from "../clear-all-button";
 
 export const dynamic = "force-dynamic";
 
@@ -57,22 +55,15 @@ export default async function DesignComponentsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex justify-end">
-        <ClearAllButton
-          action={clearAllComponents}
-          label="Clear all components"
-          confirmText={`Delete all ${components.length} component(s) for this workspace? A full sync afterwards will repopulate whatever's still actually in the current Figma file.`}
-        />
-      </div>
-      <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+    // Bulk "clear all" lives in Settings now (see settings/cleanup-actions.ts),
+    // split there between metadata-only rows and rows already committed to the
+    // design-system repo -- the distinction that matters for whether clearing
+    // is a plain DB delete or also touches the repo (see DeleteComponentButton).
+    <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
       {components.map((component) => (
-        <li key={component.id} className="relative">
-          <Link
-            href={`/design-system/components/${component.slug}`}
-            className="block rounded-lg border border-neutral-200 bg-white p-4 text-sm hover:border-neutral-300"
-          >
-            <div className="pr-14 font-medium">{component.name}</div>
+        <li key={component.id} className="rounded-lg border border-neutral-200 bg-white p-4 text-sm hover:border-neutral-300">
+          <Link href={`/design-system/components/${component.slug}`} className="block">
+            <div className="font-medium">{component.name}</div>
             {component.description && (
               <p className="mt-1 line-clamp-2 text-xs text-neutral-400">{component.description}</p>
             )}
@@ -86,12 +77,14 @@ export default async function DesignComponentsPage() {
                 to remove for good. */}
             <div className="mt-1 text-xs text-neutral-400">Last synced {formatRelativeTime(component.updatedAt)}</div>
           </Link>
-          <div className="absolute right-3 top-3">
-            <DeleteComponentButton slug={component.slug} name={component.name} stopNavigation />
+          <div className="mt-2 flex items-center justify-between border-t border-neutral-100 pt-2">
+            <span className="text-xs text-neutral-400">
+              {component.codeSyncStatus === "committed" ? "In design-system repo" : "Metadata only"}
+            </span>
+            <DeleteComponentButton slug={component.slug} name={component.name} codeSyncStatus={component.codeSyncStatus} />
           </div>
         </li>
       ))}
-      </ul>
-    </div>
+    </ul>
   );
 }

@@ -6,10 +6,12 @@ import { getFigmaConnectionStatus } from "@/lib/session";
 import { SetupNotice } from "@/components/setup-notice";
 import { saveDesignSettings, disconnectFigma } from "./actions";
 import { confirmAndMergePendingPr } from "./codegen-actions";
+import { clearUnsyncedComponents, clearCodeSyncedComponents, clearUnsyncedTokens, clearCodeSyncedTokens } from "./cleanup-actions";
 import { FigmaSyncButton } from "./figma-sync-button";
 import { DesignSystemCodegenPanel } from "./design-system-codegen-panel";
 import { ResyncTokensButton } from "./resync-tokens-button";
-import { loadComponentSlugsForWorkspace } from "@/lib/design-system-codegen/data";
+import { ClearAllButton } from "../clear-all-button";
+import { loadComponentSlugsForWorkspace, loadCleanupCounts } from "@/lib/design-system-codegen/data";
 
 export const dynamic = "force-dynamic";
 // Note: the actual Figma sync (previously a slow Server Action here, hence
@@ -28,7 +30,8 @@ async function loadSettingsData() {
   const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
   const figma = await getFigmaConnectionStatus();
   const components = await loadComponentSlugsForWorkspace(workspaceId);
-  return { ws, figma, components };
+  const cleanupCounts = await loadCleanupCounts(workspaceId);
+  return { ws, figma, components, cleanupCounts };
 }
 
 function FigmaResultBanner({
@@ -73,7 +76,7 @@ export default async function DesignSettingsPage({
     return <SetupNotice error={loadError} />;
   }
 
-  const { ws, figma, components } = data;
+  const { ws, figma, components, cleanupCounts } = data;
   const canSync = figma.connected && Boolean(ws.figmaFileKey);
   const codeSyncEnabled = ws.designComponentStack !== "none";
 
@@ -211,6 +214,63 @@ export default async function DesignSettingsPage({
             generation yet&quot; to enable this.
           </p>
         )}
+      </section>
+
+      <section className="rounded-lg border border-neutral-200 bg-white p-5">
+        <h2 className="text-sm font-medium text-neutral-700 mb-1">Cleanup</h2>
+        <p className="mb-4 text-xs text-neutral-400">
+          Bulk removal for stale/duplicate rows -- for when a Figma file has piled up enough garbage that
+          sorting it out one at a time (Delete on each component/token) isn&apos;t worth it. Metadata-only
+          rows are a plain delete; rows already generated into the design-system repo also need their code
+          removed there, so those open/update a pull request instead of deleting anything immediately -- same
+          review-before-merge as the rest of code sync above.
+        </p>
+
+        <div className="flex flex-col gap-4">
+          <div>
+            <h3 className="mb-2 text-xs font-medium text-neutral-600">Components</h3>
+            <div className="flex flex-wrap items-center gap-3">
+              {cleanupCounts.componentsUnsynced > 0 ? (
+                <ClearAllButton
+                  action={clearUnsyncedComponents}
+                  label={`Clear synced-only components (${cleanupCounts.componentsUnsynced})`}
+                  confirmText={`Delete ${cleanupCounts.componentsUnsynced} component(s) that were never generated into code? A sync afterwards will repopulate whatever's still in the current Figma file.`}
+                />
+              ) : (
+                <span className="text-xs text-neutral-400">No synced-only components.</span>
+              )}
+              {cleanupCounts.componentsCodeSynced > 0 && (
+                <ClearAllButton
+                  action={clearCodeSyncedComponents}
+                  label={`Remove components from repo (${cleanupCounts.componentsCodeSynced})`}
+                  confirmText={`Remove ${cleanupCounts.componentsCodeSynced} component(s) already generated into the design-system repo? This opens/updates a pull request deleting their files there -- review & confirm it below once ready, same as generation.`}
+                />
+              )}
+            </div>
+          </div>
+
+          <div>
+            <h3 className="mb-2 text-xs font-medium text-neutral-600">Tokens</h3>
+            <div className="flex flex-wrap items-center gap-3">
+              {cleanupCounts.tokensUnsynced > 0 ? (
+                <ClearAllButton
+                  action={clearUnsyncedTokens}
+                  label={`Clear synced-only tokens (${cleanupCounts.tokensUnsynced})`}
+                  confirmText={`Delete ${cleanupCounts.tokensUnsynced} token(s) that were never generated into code? A sync afterwards will repopulate whatever's still in the current Figma file.`}
+                />
+              ) : (
+                <span className="text-xs text-neutral-400">No synced-only tokens.</span>
+              )}
+              {cleanupCounts.tokensCodeSynced > 0 && (
+                <ClearAllButton
+                  action={clearCodeSyncedTokens}
+                  label={`Remove tokens from repo (${cleanupCounts.tokensCodeSynced})`}
+                  confirmText={`Remove ${cleanupCounts.tokensCodeSynced} token(s) already generated into tokens.css in the design-system repo? This opens/updates a pull request with a regenerated tokens.css that drops them -- review & confirm it below once ready.`}
+                />
+              )}
+            </div>
+          </div>
+        </div>
       </section>
     </div>
   );

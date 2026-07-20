@@ -4,8 +4,6 @@ import { designToken, workspace } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { SetupNotice } from "@/components/setup-notice";
-import { clearAllTokens } from "./actions";
-import { ClearAllButton } from "./clear-all-button";
 
 export const dynamic = "force-dynamic";
 
@@ -68,17 +66,12 @@ export default async function DesignTokensPage() {
     );
   }
 
-  const totalTokens = Array.from(byCategory.values()).reduce((sum, list) => sum + list.length, 0);
-
   return (
+    // Bulk "clear all" lives in Settings now (see settings/cleanup-actions.ts),
+    // split there between metadata-only tokens and ones already committed to
+    // tokens.css in the design-system repo -- see each token's "In repo" tag
+    // below for that same distinction at a glance.
     <div className="flex flex-col gap-8">
-      <div className="flex justify-end">
-        <ClearAllButton
-          action={clearAllTokens}
-          label="Clear all tokens"
-          confirmText={`Delete all ${totalTokens} token(s) for this workspace? A sync afterwards will repopulate whatever's still actually in the current Figma file.`}
-        />
-      </div>
       {Array.from(byCategory.entries()).map(([category, tokens]) => (
         <section key={category}>
           <h2 className="text-sm font-medium text-neutral-600 mb-3">
@@ -96,10 +89,15 @@ export default async function DesignTokensPage() {
                     style={{ backgroundColor: token.value }}
                   />
                 )}
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="font-medium truncate">{token.name}</div>
                   <div className="truncate text-xs text-neutral-400">{token.value}</div>
                 </div>
+                {token.lastCodeSyncAt && (
+                  <span className="shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-600">
+                    In repo
+                  </span>
+                )}
               </li>
             ))}
           </ul>

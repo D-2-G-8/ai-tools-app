@@ -100,6 +100,36 @@ function pascalCase(slug: string): string {
     .join("");
 }
 
+export interface ComponentSourcePaths {
+  dir: string;
+  componentName: string;
+  tsxPath: string;
+  cssPath: string;
+  storiesPath: string;
+  indexPath: string;
+}
+
+/**
+ * The exact repo-relative paths a component's generated files live at,
+ * derived purely from its slug (same pascalCase(slug) generateComponentCode
+ * uses). Single source of truth for both writing those paths (below) and
+ * deleting them (design-system/components/actions.ts, settings/cleanup-
+ * actions.ts's "remove code-synced component(s)" flow) -- so a rename of
+ * this convention can't silently desync the two.
+ */
+export function componentSourcePaths(slug: string): ComponentSourcePaths {
+  const componentName = pascalCase(slug);
+  const dir = `src/components/${slug}`;
+  return {
+    dir,
+    componentName,
+    tsxPath: `${dir}/${componentName}.tsx`,
+    cssPath: `${dir}/${componentName}.module.css`,
+    storiesPath: `${dir}/${componentName}.stories.tsx`,
+    indexPath: `${dir}/index.ts`,
+  };
+}
+
 function describeComponent(component: ComponentForCodegen): string {
   const variantLines = component.variants.map((v) => `- ${v.name}${v.description ? ` -- ${v.description}` : ""}`);
   const stateLines = component.states.map((s) => `- ${s.name}${s.description ? ` -- ${s.description}` : ""}`);
@@ -301,7 +331,8 @@ export async function generateComponentCode(
   // fully derivable from component.slug alone, which is what the
   // component detail page's Storybook iframe link needs (see
   // src/app/(protected)/design-system/components/[slug]/page.tsx).
-  const componentName = pascalCase(component.slug);
+  const paths = componentSourcePaths(component.slug);
+  const componentName = paths.componentName;
   const { contract, inputTokens: t1, outputTokens: o1 } = await generateContract(model, component, availableTokens);
 
   const [tsx, css, stories] = await Promise.all([
@@ -318,19 +349,18 @@ export async function generateComponentCode(
     );
   }
 
-  const dir = `src/components/${component.slug}`;
   const inputTokens = t1 + tsx.inputTokens + css.inputTokens + stories.inputTokens;
   const outputTokens = o1 + tsx.outputTokens + css.outputTokens + stories.outputTokens;
 
   return {
     componentName,
-    tsxPath: `${dir}/${componentName}.tsx`,
+    tsxPath: paths.tsxPath,
     tsxContent: tsx.content,
-    cssPath: `${dir}/${componentName}.module.css`,
+    cssPath: paths.cssPath,
     cssContent: css.content,
-    storiesPath: `${dir}/${componentName}.stories.tsx`,
+    storiesPath: paths.storiesPath,
     storiesContent: stories.content,
-    indexPath: `${dir}/index.ts`,
+    indexPath: paths.indexPath,
     indexContent: `export { ${componentName} } from "./${componentName}";\nexport type { ${componentName}Props } from "./${componentName}";\n`,
     inputTokens,
     outputTokens,

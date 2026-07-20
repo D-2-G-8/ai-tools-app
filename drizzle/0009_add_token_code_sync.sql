@@ -1,0 +1,1 @@
+ALTER TABLE "design_token" ADD COLUMN "last_code_sync_at" timestamp with time zone;

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { workspace } from "@/db/schema";
+import { designToken, workspace } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { commitFiles, openOrUpdatePullRequest, mergePullRequest } from "@/lib/github/client";
@@ -18,6 +18,24 @@ const PR_TITLE = "Design system: Figma sync";
 const PR_BODY =
   "Opened automatically by ai-tools-app's design-system code sync. Review the CI status below, then " +
   'click "Confirm & merge" in Settings once it looks right -- this repo never auto-merges generated code.';
+
+/**
+ * Regenerates tokens.css from EVERY currently-synced token and commits it
+ * -- shared by startCodeGenSession and resyncTokens below, since both do
+ * exactly this. Also stamps every token row with lastCodeSyncAt: since
+ * the file is always regenerated in full (see generateTokensCss), a
+ * successful commit here means every token that currently exists just
+ * got shipped as code, not just the ones that changed -- see
+ * designToken.lastCodeSyncAt's doc comment in src/db/schema.ts and its
+ * use in settings/cleanup-actions.ts (deciding whether clearing a token
+ * needs a repo commit or is just a DB delete).
+ */
+async function commitTokensCss(workspaceId: string, branchName: string): Promise<void> {
+  const tokens = await loadTokensForCss(workspaceId);
+  const tokensCss = generateTokensCss(tokens);
+  await commitFiles(branchName, "Update design tokens from Figma", [{ path: "src/tokens/tokens.css", content: tokensCss }]);
+  await db.update(designToken).set({ lastCodeSyncAt: new Date() }).where(eq(designToken.workspaceId, workspaceId));
+}
 
 /**
  * Starts a "Generate code" session: opens (or reuses -- see
@@ -36,10 +54,7 @@ export async function startCodeGenSession(): Promise<{ branchName: string }> {
   }
 
   const branchName = await getOrOpenSessionBranch(workspaceId);
-
-  const tokens = await loadTokensForCss(workspaceId);
-  const tokensCss = generateTokensCss(tokens);
-  await commitFiles(branchName, "Update design tokens from Figma", [{ path: "src/tokens/tokens.css", content: tokensCss }]);
+  await commitTokensCss(workspaceId, branchName);
 
   return { branchName };
 }
@@ -94,10 +109,8 @@ export async function resyncTokens(): Promise<{ ok: boolean; error?: string; sum
       return { ok: true, summary };
     }
 
-    const tokens = await loadTokensForCss(workspaceId);
-    const tokensCss = generateTokensCss(tokens);
     const branchName = await getOrOpenSessionBranch(workspaceId);
-    await commitFiles(branchName, "Update design tokens from Figma", [{ path: "src/tokens/tokens.css", content: tokensCss }]);
+    await commitTokensCss(workspaceId, branchName);
     const { prUrl } = await finishCodeGenSession(branchName);
 
     revalidatePath(SETTINGS_PATH);

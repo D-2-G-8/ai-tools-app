@@ -448,6 +448,20 @@ export const designToken = pgTable(
     value: text("value").notNull(), // CSS-ready value, e.g. "#0B0B0C" or "400 16px/22px Inter"
     description: text("description"),
     figmaNodeId: varchar("figma_node_id", { length: 64 }),
+    // Set whenever this token was included in a tokens.css commit to the
+    // design-system repo (src/lib/design-system-codegen/tokens.ts's
+    // serializer regenerates the WHOLE file from every currently-synced
+    // token each time it runs, so every row present at that moment gets
+    // stamped) -- null means this token exists only as platform metadata
+    // and was never actually shipped as code. Mirrors designComponent's
+    // codeSyncStatus/lastCodeSyncAt below, but simpler: tokens.css commits
+    // are synchronous (no async "pending" state to represent), and one
+    // token can't be "committed" independently of the rest since the file
+    // is always regenerated in full -- so a single nullable timestamp is
+    // enough. Drives whether deleting a token is a plain DB delete or also
+    // needs a commit removing it from tokens.css (see design-system/
+    // settings/cleanup-actions.ts).
+    lastCodeSyncAt: timestamp("last_code_sync_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

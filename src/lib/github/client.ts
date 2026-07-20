@@ -175,7 +175,8 @@ export async function getOrCreateBranch(branchName: string): Promise<string> {
 
 export interface CommitFile {
   path: string;
-  content: string;
+  /** null deletes this path from the tree (see commitFiles below). */
+  content: string | null;
 }
 
 interface RawCommit {
@@ -197,6 +198,13 @@ interface RawTree {
  * simpler one-file-per-commit Contents API -- so a component's TSX +
  * stylesheet + story file (or a whole sync run's token file) land as one
  * clean, reviewable commit instead of several sequential ones.
+ *
+ * A file with `content: null` is DELETED from the tree instead of written
+ * -- the Git Data API supports this by passing `sha: null` for that path
+ * in the tree call (no blob needed for a removal). Lets one commit both
+ * add/update some paths and remove others, which the "delete a component"
+ * flow needs (design-system/components/actions.ts, settings/cleanup-
+ * actions.ts) to remove a component's whole file set atomically.
  */
 export async function commitFiles(branchName: string, message: string, files: CommitFile[]): Promise<string> {
   const { owner, repo } = getConfig();
@@ -210,13 +218,16 @@ export async function commitFiles(branchName: string, message: string, files: Co
   }
   const parentCommit = await githubFetch<RawCommit>(`/repos/${owner}/${repo}/git/commits/${branchSha}`);
 
-  const blobs = await Promise.all(
+  const entries = await Promise.all(
     files.map(async (file) => {
+      if (file.content === null) {
+        return { path: file.path, sha: null as string | null };
+      }
       const blob = await githubFetch<RawBlob>(`/repos/${owner}/${repo}/git/blobs`, {
         method: "POST",
         body: JSON.stringify({ content: file.content, encoding: "utf-8" }),
       });
-      return { path: file.path, sha: blob.sha };
+      return { path: file.path, sha: blob.sha as string | null };
     }),
   );
 
@@ -224,7 +235,7 @@ export async function commitFiles(branchName: string, message: string, files: Co
     method: "POST",
     body: JSON.stringify({
       base_tree: parentCommit.tree.sha,
-      tree: blobs.map((b) => ({ path: b.path, mode: "100644", type: "blob", sha: b.sha })),
+      tree: entries.map((e) => ({ path: e.path, mode: "100644", type: "blob", sha: e.sha })),
     }),
   });
 

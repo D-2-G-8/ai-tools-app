@@ -46,12 +46,9 @@ export default async function DesignComponentDetailPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <Link href="/design-system/components" className="text-sm text-neutral-500 hover:underline">
-          ← Back to components
-        </Link>
-        <DeleteComponentButton slug={component.slug} name={component.name} redirectTo="/design-system/components" />
-      </div>
+      <Link href="/design-system/components" className="text-sm text-neutral-500 hover:underline">
+        ← Back to components
+      </Link>
 
       <div>
         <h2 className="text-xl font-semibold">{component.name}</h2>
@@ -107,6 +104,14 @@ export default async function DesignComponentDetailPage({
           {component.lastCodeCommitSha && <> (commit {component.lastCodeCommitSha.slice(0, 7)})</>}
         </p>
         <ResyncComponentButton slug={component.slug} />
+        <div className="mt-3 border-t border-neutral-100 pt-3">
+          <DeleteComponentButton
+            slug={component.slug}
+            name={component.name}
+            codeSyncStatus={component.codeSyncStatus}
+            redirectTo="/design-system/components"
+          />
+        </div>
       </section>
 
       <DesignSystemPreview slug={component.slug} codeSyncStatus={component.codeSyncStatus} />
