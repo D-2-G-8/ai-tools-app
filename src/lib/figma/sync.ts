@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "@/db";
 import { designToken, designComponent, type DesignTokenCategory, type DesignComponentVariant, type DesignComponentState } from "@/db/schema";
-import { figmaGet } from "./client";
+import { figmaGet, FIGMA_FILE_FETCH_TIMEOUT_MS } from "./client";
 
 /**
  * Pulls a Figma file's styles and components and upserts them into
@@ -292,7 +292,11 @@ export async function syncDesignSystemFromFigma(
   fileKey: string,
   accessToken: string,
 ): Promise<SyncResult> {
-  const file = await figmaGet<FigmaFileResponse>(`/files/${encodeURIComponent(fileKey)}`, accessToken);
+  const file = await figmaGet<FigmaFileResponse>(
+    `/files/${encodeURIComponent(fileKey)}`,
+    accessToken,
+    FIGMA_FILE_FETCH_TIMEOUT_MS,
+  );
 
   const resolvedStyles = resolveStylesFromDocument(file.document, file.styles);
   let tokensUpserted = 0;

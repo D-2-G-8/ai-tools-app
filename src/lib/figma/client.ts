@@ -4,6 +4,11 @@ import { refreshFigmaToken } from "./oauth";
 
 const FIGMA_API_BASE = "https://api.figma.com/v1";
 const FIGMA_FETCH_TIMEOUT_MS = 20_000;
+// GET /v1/files/:key returns the full document tree -- for a large/complex
+// file this can genuinely take much longer than a typical API call (Figma
+// itself warns about this for big files). Used by src/lib/figma/sync.ts,
+// which needs a longer allowance than the default above.
+export const FIGMA_FILE_FETCH_TIMEOUT_MS = 55_000;
 // Refresh a bit before the real 90-day expiry so a sync started right at
 // the boundary doesn't fail mid-request.
 const REFRESH_SKEW_MS = 5 * 60 * 1000;
@@ -66,12 +71,12 @@ export async function getValidFigmaAccessToken(): Promise<string | null> {
 }
 
 /** GET against the Figma REST API with the given bearer token. */
-export async function figmaGet<T>(path: string, accessToken: string): Promise<T> {
+export async function figmaGet<T>(path: string, accessToken: string, timeoutMs = FIGMA_FETCH_TIMEOUT_MS): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${FIGMA_API_BASE}${path}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(FIGMA_FETCH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
     throw new Error(`Could not reach ${FIGMA_API_BASE}${path} -- ${describeFigmaError(err)}`);

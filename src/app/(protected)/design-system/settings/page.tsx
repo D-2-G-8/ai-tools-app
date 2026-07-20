@@ -7,6 +7,11 @@ import { SetupNotice } from "@/components/setup-notice";
 import { saveDesignSettings, disconnectFigma, syncFigmaDesignSystem } from "./actions";
 
 export const dynamic = "force-dynamic";
+// Sync now (see actions.ts) fetches the whole Figma file, which can take a
+// while for a large/complex file (see client.ts's FIGMA_FILE_FETCH_TIMEOUT_MS) --
+// give the Server Action the same longer allowance the other slow actions in
+// this app already get (documents/page.tsx, mockups/page.tsx).
+export const maxDuration = 60;
 
 const STACK_OPTIONS = [
   { value: "react-scss", label: "React + SCSS" },
