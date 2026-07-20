@@ -1,0 +1,1 @@
+ALTER TABLE "design_component" ADD COLUMN "is_icon" boolean DEFAULT false NOT NULL;

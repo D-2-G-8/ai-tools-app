@@ -318,31 +318,89 @@ interface ResolvedComponentGroup {
   figmaNodeIds: string[];
   variants: DesignComponentVariant[];
   states: DesignComponentState[];
+  isIcon: boolean;
 }
 
 /**
- * Figma allows multiple, entirely distinct component sets to share the same
- * literal name (e.g. a dozen different "Tooltip" sets, one per theme/
- * placement) -- confirmed against a real synced file. Disambiguates those
- * using the page each one lives on (containing_frame.pageName, only
- * available from the fast path's lightweight listing endpoints -- the
- * fallback path's plain Component/ComponentSet types don't carry this, so
- * duplicate names there fall back to just a numeric slug suffix).
+ * Best-effort "is this a single icon rather than a real UI component"
+ * heuristic -- Figma's API has no dedicated field for this, so it's
+ * inferred from naming conventions:
+ *
+ * 1. It lives on a page/frame whose name contains "icon" (e.g. a page
+ *    literally called "Icons") -- containing_frame.pageName, only
+ *    available from the fast path's lightweight listing endpoints.
+ * 2. Its own name uses "/"-separated hierarchical segments (e.g.
+ *    "Outline/Regular/Plus", a common Figma icon-library convention --
+ *    confirmed against a real icon set). Figma's own auto-generated
+ *    variant-name syntax never uses "/" (it's "Key=Value, Key2=Value2",
+ *    see parseVariantName), so this can't misfire on a real variant name.
+ *
+ * Either signal is enough -- see design-system/icons/page.tsx (the "Icons"
+ * tab this drives) and the Components list (which excludes these). If
+ * this misclassifies something in a particular Figma file, it shows up
+ * immediately as a component sitting in the wrong tab -- easy to spot and
+ * report back, versus silently guessing wrong forever.
+ */
+function isLikelyIconName(name: string, pageLabel: string | undefined): boolean {
+  if (pageLabel && /icon/i.test(pageLabel)) return true;
+  return name.includes("/");
+}
+
+function slugKeyFor(name: string): string {
+  return name.trim();
+}
+
+/**
+ * Figma allows multiple, entirely distinct component sets/standalone
+ * components to share the same literal name (e.g. a dozen "Tooltip"
+ * entries, one per theme/placement, each never using Figma's own
+ * Component Set/Variants feature to tie them together) -- confirmed
+ * against a real synced file. Rather than keeping those as separate rows
+ * (this used to disambiguate them with a page-name suffix, which just
+ * produced more duplicate-looking rows), same-name entries are merged
+ * into ONE group here: their variants/states union via a Map keyed by
+ * label (so an identical variant/state coming from two merged entries
+ * collapses into one, never duplicating), and their figmaNodeIds union via
+ * a Set. This is intentionally a literal-name match only -- it won't
+ * catch e.g. "Button Primary" / "Button Secondary" (different names, not
+ * expressed as Figma variants of one shared component) -- that case needs
+ * a person's judgment call, see the Components list's manual "Merge"
+ * action for it.
  */
 function buildComponentGroups(
   sets: NormalizedComponentSet[],
   standalone: NormalizedStandaloneComponent[],
 ): ResolvedComponentGroup[] {
-  const usedSlugs = new Set<string>();
-  const uniqueSlug = (base: string) => {
-    let slug = base;
-    let n = 2;
-    while (usedSlugs.has(slug)) slug = `${base}-${n++}`;
-    usedSlugs.add(slug);
-    return slug;
-  };
+  const byName = new Map<string, ResolvedComponentGroup>();
+  const order: string[] = [];
 
-  const named: (ResolvedComponentGroup & { pageLabel?: string })[] = [];
+  const mergeIn = (
+    name: string,
+    description: string | undefined,
+    figmaNodeIds: string[],
+    variants: DesignComponentVariant[],
+    states: DesignComponentState[],
+    isIcon: boolean,
+  ) => {
+    const key = slugKeyFor(name);
+    const existing = byName.get(key);
+    if (!existing) {
+      byName.set(key, { slug: "", name: key, description, figmaNodeIds: [...figmaNodeIds], variants, states, isIcon });
+      order.push(key);
+      return;
+    }
+
+    const variantMap = new Map(existing.variants.map((v) => [v.name, v]));
+    for (const v of variants) if (!variantMap.has(v.name)) variantMap.set(v.name, v);
+    const stateMap = new Map(existing.states.map((s) => [s.name, s]));
+    for (const s of states) if (!stateMap.has(s.name)) stateMap.set(s.name, s);
+
+    existing.variants = Array.from(variantMap.values());
+    existing.states = Array.from(stateMap.values());
+    existing.figmaNodeIds = Array.from(new Set([...existing.figmaNodeIds, ...figmaNodeIds]));
+    existing.description = existing.description || description;
+    existing.isIcon = existing.isIcon || isIcon;
+  };
 
   for (const set of sets) {
     const variantMap = new Map<string, DesignComponentVariant>();
@@ -363,38 +421,41 @@ function buildComponentGroups(
       }
     }
 
-    named.push({
-      slug: uniqueSlug(slugify(set.name)),
-      name: set.name,
-      description: set.description || undefined,
-      pageLabel: set.pageLabel,
-      figmaNodeIds: [set.nodeId, ...set.variantNodes.map((c) => c.id)],
-      variants: Array.from(variantMap.values()),
-      states: Array.from(stateMap.values()),
-    });
+    mergeIn(
+      set.name,
+      set.description,
+      [set.nodeId, ...set.variantNodes.map((c) => c.id)],
+      Array.from(variantMap.values()),
+      Array.from(stateMap.values()),
+      isLikelyIconName(set.name, set.pageLabel),
+    );
   }
 
   for (const component of standalone) {
-    named.push({
-      slug: uniqueSlug(slugify(component.name)),
-      name: component.name,
-      description: component.description || undefined,
-      pageLabel: component.pageLabel,
-      figmaNodeIds: [component.nodeId],
-      variants: [],
-      states: [],
-    });
+    mergeIn(
+      component.name,
+      component.description,
+      [component.nodeId],
+      [],
+      [],
+      isLikelyIconName(component.name, component.pageLabel),
+    );
   }
 
-  const nameCounts = new Map<string, number>();
-  for (const g of named) nameCounts.set(g.name, (nameCounts.get(g.name) ?? 0) + 1);
-  for (const g of named) {
-    if ((nameCounts.get(g.name) ?? 0) > 1 && g.pageLabel) {
-      g.name = `${g.name} — ${g.pageLabel}`;
-    }
-  }
+  const usedSlugs = new Set<string>();
+  const uniqueSlug = (base: string) => {
+    let slug = base;
+    let n = 2;
+    while (usedSlugs.has(slug)) slug = `${base}-${n++}`;
+    usedSlugs.add(slug);
+    return slug;
+  };
 
-  return named;
+  return order.map((key) => {
+    const group = byName.get(key)!;
+    group.slug = uniqueSlug(slugify(group.name));
+    return group;
+  });
 }
 
 // ---- DB upserts (shared by both paths) ----
@@ -430,6 +491,7 @@ async function upsertComponent(workspaceId: string, group: ResolvedComponentGrou
       variants: group.variants,
       states: group.states,
       figmaNodeIds: group.figmaNodeIds,
+      isIcon: group.isIcon,
     })
     .onConflictDoUpdate({
       target: [designComponent.workspaceId, designComponent.slug],
@@ -439,6 +501,7 @@ async function upsertComponent(workspaceId: string, group: ResolvedComponentGrou
         variants: group.variants,
         states: group.states,
         figmaNodeIds: group.figmaNodeIds,
+        isIcon: group.isIcon,
         updatedAt: new Date(),
       },
     });
@@ -715,7 +778,17 @@ export async function resyncComponentFromFigma(
 
   await db
     .update(designComponent)
-    .set({ name: node.name, variants: newVariants, states: newStates, figmaNodeIds: newFigmaNodeIds, updatedAt: new Date() })
+    .set({
+      name: node.name,
+      variants: newVariants,
+      states: newStates,
+      figmaNodeIds: newFigmaNodeIds,
+      // No pageLabel available from a raw node fetch (only the fast
+      // path's lightweight listing endpoints carry containing_frame) --
+      // name-only re-check, see isLikelyIconName's doc comment.
+      isIcon: isLikelyIconName(node.name, undefined),
+      updatedAt: new Date(),
+    })
     .where(eq(designComponent.id, component.id));
 
   const summary =

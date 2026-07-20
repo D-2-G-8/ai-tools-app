@@ -507,6 +507,14 @@ export const designComponent = pgTable(
     states: jsonb("states").$type<DesignComponentState[]>().notNull().default([]),
     figmaNodeIds: jsonb("figma_node_ids").$type<string[]>().notNull().default([]),
     notes: text("notes"),
+    // True for a Figma component/set that looks like a single icon rather
+    // than a real UI component -- see src/lib/figma/sync.ts's
+    // isLikelyIconName doc comment for the exact (best-effort, no-Figma-
+    // API-field-for-this heuristic). Icon libraries commonly run into the
+    // hundreds of entries, so they get their own "Icons" tab (a dense
+    // grid, see design-system/icons/page.tsx) instead of cluttering the
+    // Components list one full card at a time.
+    isIcon: boolean("is_icon").notNull().default(false),
     // React/CSS code generation tracking (src/lib/design-system-codegen/) --
     // separate from the Figma metadata sync above, see that module's doc
     // comment for why. Never touched by the metadata-only Figma sync itself.

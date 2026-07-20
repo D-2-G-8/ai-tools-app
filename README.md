@@ -28,7 +28,12 @@ uploaded documents and project context. At this stage, only `.md` document uploa
 - **Design System**: per-workspace design tokens and components (`design_token`/`design_component` tables),
   synced from a Figma file via OAuth (`src/lib/figma/`) -- each person connects their own Figma account from
   `/design-system/settings`, independent of the Google account used to sign into the app; see "Figma setup"
-  below
+  below. Sync auto-merges components/sets that share an exact Figma name (never duplicating a variant/state
+  across the merge) and flags likely icons (`isLikelyIconName` in `sync.ts` -- "/"-hierarchical names like
+  "Outline/Regular/Plus", or a Figma page name containing "icon") into their own dense "Icons" tab instead of
+  the Components list. For duplicates sync can't recognize on its own (different literal names, e.g. "Button
+  Primary" / "Button Secondary" as separate Figma components instead of variants of one), the Components list
+  has a manual "Select to merge duplicates" mode.
 - **Design system code sync**: generates real React + CSS Modules components (and a tokens.css) from the
   synced Figma data and opens a pull request in a SEPARATE `design-system` repo other UI services install as
   an npm package -- nothing merges without someone explicitly clicking "Confirm & merge" in Settings; see

@@ -1,21 +1,25 @@
 import Link from "next/link";
 import { db } from "@/db";
 import { designComponent, workspace } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { SetupNotice } from "@/components/setup-notice";
 import { formatRelativeTime } from "@/lib/format-relative-time";
-import { DeleteComponentButton } from "./delete-component-button";
+import { ComponentsGrid, type ComponentListItem } from "./components-grid";
 
 export const dynamic = "force-dynamic";
 
 async function loadComponents() {
   const workspaceId = await getCurrentWorkspaceId();
   const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
+  // Icons get their own tab (design-system/icons) -- there are commonly
+  // hundreds of them, and a full card per icon here would drown out real
+  // components. See src/lib/figma/sync.ts's isLikelyIconName for how a
+  // row ends up flagged isIcon.
   const components = await db
     .select()
     .from(designComponent)
-    .where(eq(designComponent.workspaceId, workspaceId))
+    .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.isIcon, false)))
     .orderBy(designComponent.name);
   return { ws, components };
 }
@@ -54,37 +58,21 @@ export default async function DesignComponentsPage() {
     );
   }
 
-  return (
-    // Bulk "clear all" lives in Settings now (see settings/cleanup-actions.ts),
-    // split there between metadata-only rows and rows already committed to the
-    // design-system repo -- the distinction that matters for whether clearing
-    // is a plain DB delete or also touches the repo (see DeleteComponentButton).
-    <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-      {components.map((component) => (
-        <li key={component.id} className="rounded-lg border border-neutral-200 bg-white p-4 text-sm hover:border-neutral-300">
-          <Link href={`/design-system/components/${component.slug}`} className="block">
-            <div className="font-medium">{component.name}</div>
-            {component.description && (
-              <p className="mt-1 line-clamp-2 text-xs text-neutral-400">{component.description}</p>
-            )}
-            <div className="mt-2 text-xs text-neutral-400">
-              {component.variants.length} variants · {component.states.length} states
-            </div>
-            {/* Last time metadata sync (full or targeted) confirmed this component still exists in
-                Figma -- see delete-component-button.tsx's doc comment for why this matters before
-                deleting: a row a RECENT sync just confirmed will simply come back on the next sync,
-                while one with an old timestamp here wasn't found by the most recent sync and is safe
-                to remove for good. */}
-            <div className="mt-1 text-xs text-neutral-400">Last synced {formatRelativeTime(component.updatedAt)}</div>
-          </Link>
-          <div className="mt-2 flex items-center justify-between border-t border-neutral-100 pt-2">
-            <span className="text-xs text-neutral-400">
-              {component.codeSyncStatus === "committed" ? "In design-system repo" : "Metadata only"}
-            </span>
-            <DeleteComponentButton slug={component.slug} name={component.name} codeSyncStatus={component.codeSyncStatus} />
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
+  // Pre-formatted server-side (not passed as a raw Date) so the grid below
+  // can stay a plain, easily-serializable client component.
+  const items: ComponentListItem[] = components.map((c) => ({
+    id: c.id,
+    slug: c.slug,
+    name: c.name,
+    description: c.description,
+    variantsCount: c.variants.length,
+    statesCount: c.states.length,
+    lastSyncedLabel: formatRelativeTime(c.updatedAt),
+    codeSyncStatus: c.codeSyncStatus,
+  }));
+
+  // Bulk "clear all" lives in Settings now (see settings/cleanup-actions.ts),
+  // split there between metadata-only rows and rows already committed to the
+  // design-system repo.
+  return <ComponentsGrid components={items} />;
 }

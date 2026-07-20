@@ -27,12 +27,18 @@ export async function loadComponentBySlug(workspaceId: string, slug: string) {
   return row ?? null;
 }
 
-/** Every component's slug + code-sync status for a workspace -- drives the "Generate code" client orchestration. */
+/**
+ * Every (non-icon) component's slug + name for a workspace -- drives the
+ * "Generate code" client orchestration. Icons are excluded: they're single
+ * glyphs, not the kind of component this pipeline generates (a contract
+ * with props/variants, a .tsx, a stylesheet, stories) -- see the "Icons"
+ * tab (design-system/icons) for those instead.
+ */
 export async function loadComponentSlugsForWorkspace(workspaceId: string) {
   const rows = await db
     .select({ slug: designComponent.slug, name: designComponent.name })
     .from(designComponent)
-    .where(eq(designComponent.workspaceId, workspaceId));
+    .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.isIcon, false)));
   return rows;
 }
 

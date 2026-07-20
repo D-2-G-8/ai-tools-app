@@ -3,6 +3,7 @@ import Link from "next/link";
 const TABS = [
   { href: "/design-system", label: "Tokens" },
   { href: "/design-system/components", label: "Components" },
+  { href: "/design-system/icons", label: "Icons" },
   { href: "/design-system/mockups", label: "Mockups" },
   { href: "/design-system/settings", label: "Settings" },
 ];
