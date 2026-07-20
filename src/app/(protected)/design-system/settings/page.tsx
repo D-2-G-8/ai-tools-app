@@ -2,8 +2,9 @@ import { db } from "@/db";
 import { workspace } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
+import { getFigmaConnectionStatus } from "@/lib/session";
 import { SetupNotice } from "@/components/setup-notice";
-import { saveDesignSettings } from "./actions";
+import { saveDesignSettings, disconnectFigma, syncFigmaDesignSystem } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -13,33 +14,108 @@ const STACK_OPTIONS = [
   { value: "none", label: "No component code generation yet" },
 ];
 
-async function loadWorkspace() {
+async function loadSettingsData() {
   const workspaceId = await getCurrentWorkspaceId();
   const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
-  return ws;
+  const figma = await getFigmaConnectionStatus();
+  return { ws, figma };
 }
 
-export default async function DesignSettingsPage() {
-  let ws: Awaited<ReturnType<typeof loadWorkspace>> | null = null;
+function FigmaResultBanner({
+  sp,
+}: {
+  sp: { [key: string]: string | string[] | undefined };
+}) {
+  const status = typeof sp.figma === "string" ? sp.figma : undefined;
+  if (!status) return null;
+
+  if (status === "connected") {
+    return (
+      <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">Figma connected.</p>
+    );
+  }
+  if (status === "disconnected") {
+    return <p className="rounded-md bg-neutral-100 px-3 py-2 text-sm text-neutral-600">Figma disconnected.</p>;
+  }
+  if (status === "synced") {
+    const tokens = typeof sp.tokens === "string" ? sp.tokens : "0";
+    const skipped = typeof sp.skipped === "string" ? sp.skipped : "0";
+    const components = typeof sp.components === "string" ? sp.components : "0";
+    return (
+      <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+        Synced {tokens} token(s) and {components} component(s) from Figma
+        {skipped !== "0" && ` (${skipped} style(s) couldn't be resolved to a value and were skipped)`}.
+      </p>
+    );
+  }
+  if (status === "error") {
+    const message = typeof sp.figmaMessage === "string" ? sp.figmaMessage : "Something went wrong.";
+    return <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{message}</p>;
+  }
+  return null;
+}
+
+export default async function DesignSettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const sp = await searchParams;
+
+  let data: Awaited<ReturnType<typeof loadSettingsData>> | null = null;
   let loadError: unknown = null;
   try {
-    ws = await loadWorkspace();
+    data = await loadSettingsData();
   } catch (err) {
     loadError = err;
   }
 
-  if (loadError || !ws) {
+  if (loadError || !data) {
     return <SetupNotice error={loadError} />;
   }
 
+  const { ws, figma } = data;
+  const canSync = figma.connected && Boolean(ws.figmaFileKey);
+
   return (
     <div className="flex flex-col gap-8 max-w-2xl">
+      <FigmaResultBanner sp={sp} />
+
+      <section className="rounded-lg border border-neutral-200 bg-white p-5">
+        <h2 className="text-sm font-medium text-neutral-700 mb-1">Figma account</h2>
+        <p className="mb-4 text-xs text-neutral-400">
+          Each person connects their own Figma account -- whichever login is convenient for them (personal,
+          a work seat, whatever), independent of the Google account used to sign into this app. Nobody needs
+          to standardize accounts across systems just to sync the design system.
+        </p>
+
+        {figma.connected ? (
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-neutral-600">
+              Connected{figma.figmaUserHandle ? ` as ${figma.figmaUserHandle}` : ""}
+            </span>
+            <form action={disconnectFigma}>
+              <button type="submit" className="text-xs text-red-600 hover:underline">
+                Disconnect
+              </button>
+            </form>
+          </div>
+        ) : (
+          <a
+            href="/api/figma/oauth/start"
+            className="inline-block rounded-md bg-neutral-900 px-4 py-1.5 text-sm text-white hover:bg-neutral-700"
+          >
+            Connect Figma
+          </a>
+        )}
+      </section>
+
       <section className="rounded-lg border border-neutral-200 bg-white p-5">
         <h2 className="text-sm font-medium text-neutral-700 mb-1">Figma source</h2>
         <p className="mb-4 text-xs text-neutral-400">
-          The file key used when syncing tokens and components from Figma. Syncing itself currently runs
-          from a Claude session with access to this file (via the Figma MCP connector) — a per-user Figma
-          token in Settings, for syncing straight from the app, is a possible follow-up.
+          The file key used when syncing tokens and components from Figma -- the part of the file URL after
+          <code className="mx-1 rounded bg-neutral-100 px-1 py-0.5">/file/</code>
+          or <code className="mx-1 rounded bg-neutral-100 px-1 py-0.5">/design/</code>.
         </p>
         <form action={saveDesignSettings} className="flex flex-col gap-4">
           <label className="flex flex-col gap-1 text-sm">
@@ -74,6 +150,25 @@ export default async function DesignSettingsPage() {
             Save
           </button>
         </form>
+
+        <div className="mt-4 border-t border-neutral-100 pt-4">
+          {canSync ? (
+            <form action={syncFigmaDesignSystem}>
+              <button
+                type="submit"
+                className="rounded-md border border-neutral-300 px-4 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+              >
+                Sync now
+              </button>
+            </form>
+          ) : (
+            <p className="text-xs text-neutral-400">
+              {figma.connected
+                ? "Set a Figma file key above, then sync."
+                : "Connect Figma above, and set a file key, then sync."}
+            </p>
+          )}
+        </div>
       </section>
     </div>
   );

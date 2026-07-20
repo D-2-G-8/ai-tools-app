@@ -37,6 +37,8 @@ services:
       AUTH_GOOGLE_SECRET: ${AUTH_GOOGLE_SECRET}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY}
+      FIGMA_CLIENT_ID: ${FIGMA_CLIENT_ID}
+      FIGMA_CLIENT_SECRET: ${FIGMA_CLIENT_SECRET}
 
   postgres:
     image: pgvector/pgvector:pg16

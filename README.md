@@ -25,6 +25,10 @@ uploaded documents and project context. At this stage, only `.md` document uploa
 - **Self-hosted deployment** (Docker + docker-compose, `Dockerfile`/`docker-compose.yml`) as an alternative to
   Vercel — same codebase, chosen via `STORAGE_DRIVER` (S3-compatible storage instead of Vercel Blob) and a
   couple of env vars; see "Self-hosted deployment (Docker)" below
+- **Design System**: per-workspace design tokens and components (`design_token`/`design_component` tables),
+  synced from a Figma file via OAuth (`src/lib/figma/`) -- each person connects their own Figma account from
+  `/design-system/settings`, independent of the Google account used to sign into the app; see "Figma setup"
+  below
 
 ## Running locally
 
@@ -55,6 +59,8 @@ See `.env.example`. In short:
 | `AUTH_GOOGLE_SECRET`    | Google Cloud Console → APIs & Services → Credentials — see "Authentication setup" below                            | yes                                                                                  |
 | `ANTHROPIC_API_KEY`     | console.anthropic.com (optional, for personal use without entering a token in the UI) | yes                                                                                                                     |
 | `VOYAGE_API_KEY`        | voyageai.com (embeddings, since Claude has no embeddings API of its own)                                              | yes                                                                                                                     |
+| `FIGMA_CLIENT_ID`       | Figma → Settings → Apps → your OAuth app -- see "Figma setup" below                                                    | no, safe to expose                                                                                                     |
+| `FIGMA_CLIENT_SECRET`   | Same place as above                                                                                                    | yes                                                                                                                     |
 
 The user enters the GitLab token and LLM provider token through the UI (`/settings`) — they are stored only in
 an encrypted cookie for the duration of the browser session and are never persisted anywhere.
@@ -79,6 +85,29 @@ accepts a pending invite for their email address (`/onboarding`). Company owners
 from `/company` — **no invite email is actually sent** (there's no transactional-email provider in this app),
 so the owner needs to tell the invitee out-of-band; the invite auto-activates the next time that address signs
 in with Google.
+
+## Figma setup
+
+Optional -- only needed for the Design System's Figma sync (`/design-system/settings`). Unlike Google
+sign-in, this is a per-user connection: each person authorizes their own Figma account (whichever login is
+convenient for them -- personal, a work seat, whatever), completely independent of the Google account they
+signed into the app with. Nobody needs to standardize accounts across systems to use this.
+
+One-time setup, done once by whoever manages this deployment:
+
+1. In [Figma](https://www.figma.com/developers/apps), create a new OAuth app (Settings → Apps).
+2. Add redirect URIs: `https://<your-domain>/api/figma/oauth/callback` for production, and
+   `http://localhost:3000/api/figma/oauth/callback` for local dev -- both can be registered on the same app.
+3. Set `FIGMA_CLIENT_ID` and `FIGMA_CLIENT_SECRET` (Vercel Project Settings → Environment Variables, or
+   `.env`/`.env.local`), then redeploy/restart.
+4. Each person then connects their own account from `/design-system/settings` → "Connect Figma". The
+   requested scopes are `current_user:read` (for the "Connected as: ..." display) and `file_content:read`
+   (to read a file's styles/components for sync) -- deliberately not `file_variables:read`, since Figma
+   Variables are an Enterprise-plan-only API and requesting a scope your plan doesn't support would break the
+   connect flow.
+
+Figma access tokens last 90 days and refresh automatically in the background while connected; if a sync ever
+fails with a connection error, just reconnect from Settings.
 
 ## Deploying to Vercel
 
@@ -111,7 +140,10 @@ MinIO container by default, or point at real AWS S3), selected via `STORAGE_DRIV
 - Docker and Docker Compose v2.
 - A reverse proxy in front of the `app` container doing HTTPS termination (Caddy, nginx, Traefik, your
   corporate load balancer — anything). **This is not optional**: the session cookie that holds the GitLab/LLM
-  tokens is marked `secure` (see `src/lib/session.ts`), so sign-in silently fails over plain HTTP.
+  tokens is marked `secure` (see `src/lib/session.ts`), so sign-in silently fails over plain HTTP. The proxy
+  must also set (overwrite, not append) the `X-Forwarded-Proto` and `X-Forwarded-Host` headers to the real
+  public values -- the Figma OAuth callback (see "Figma setup" below) derives its redirect URL from these,
+  since Next.js doesn't infer the public origin on its own when self-hosted behind a proxy.
 - Google OAuth credentials (see "Authentication setup" above — same setup either way, just add the
   self-hosted domain's callback URL too).
 - Network reachability from wherever the container runs to anything it needs to reach internally (GitLab,
@@ -208,15 +240,21 @@ src/
     gitlab/client.ts    Plain-fetch GitLab REST v4 client (list MRs, fetch diff, post comment)
     code-review/    AI Review engines -- prompts, v1/v2/v3 review logic, MR-comment formatting
     storage/        File storage driver (Vercel Blob or S3-compatible, picked via STORAGE_DRIVER)
+    figma/          Figma OAuth2 (oauth.ts), authenticated REST client (client.ts), and the
+                     file-JSON -> design_token/design_component parser (sync.ts)
   app/
     sign-in/        Google sign-in page
     onboarding/     Create/join a company (after first sign-in)
     api/auth/[...nextauth]/ Auth.js route handler
+    api/figma/oauth/{start,callback}/ Figma OAuth2 redirect + callback (route handlers, not Server Actions --
+                     these need to issue real redirects to/from www.figma.com)
+    api/health/     Plain 200, used by the Docker HEALTHCHECK -- see "Self-hosted deployment" above
     (protected)/    Everything below requires a signed-in user in a company -- see layout.tsx
       presence-actions.ts  touchPresence() -- refreshes the signed-in user's lastSeenAt
       company/      Member roster (online/last-seen) + owner-only email invites + company-wide usage
       settings/     Settings -- GitLab/LLM (company-wide), model per tool (personal to you)
       documents/    Document upload/status, and per-document edit locking (see [id]/edit/)
+      design-system/ Tokens + components (synced from Figma, see settings/), plus HTML mockups
       history/      Unfinished features + run log
       tools/[toolKey]/ Runner, "Prompts" tab, and "Stats" tab per tool -- code-review-actions.ts +
                         code-review-panel.tsx special-case AI Review's own UI instead of the generic runner
