@@ -4,6 +4,7 @@ import { designToken, workspace } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { SetupNotice } from "@/components/setup-notice";
+import { figmaNodeUrl } from "@/lib/figma/links";
 
 export const dynamic = "force-dynamic";
 
@@ -96,6 +97,7 @@ export default async function DesignTokensPage() {
                     {token.name}
                   </span>
                   <span className="shrink-0 text-xs text-neutral-400">{token.value}</span>
+                  <FigmaNodeLink fileKey={ws?.figmaFileKey} nodeId={token.figmaNodeId} />
                   {token.lastCodeSyncAt && (
                     <span className="shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-600">
                       In repo
@@ -121,6 +123,7 @@ export default async function DesignTokensPage() {
                     <div className="font-medium truncate">{token.name}</div>
                     <div className="truncate text-xs text-neutral-400">{token.value}</div>
                   </div>
+                  <FigmaNodeLink fileKey={ws?.figmaFileKey} nodeId={token.figmaNodeId} />
                   {token.lastCodeSyncAt && (
                     <span className="shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-600">
                       In repo
@@ -133,5 +136,27 @@ export default async function DesignTokensPage() {
         </section>
       ))}
     </div>
+  );
+}
+
+/**
+ * Small "open this exact node in Figma" link -- lets you jump straight to
+ * what a sync actually resolved a token from, e.g. to check whether a
+ * value looks off because Figma changed or because the sync mis-resolved
+ * it. Renders nothing if either half is missing (no file key configured
+ * yet, or this particular token predates figmaNodeId being recorded).
+ */
+function FigmaNodeLink({ fileKey, nodeId }: { fileKey?: string | null; nodeId?: string | null }) {
+  if (!fileKey || !nodeId) return null;
+  return (
+    <a
+      href={figmaNodeUrl(fileKey, nodeId)}
+      target="_blank"
+      rel="noreferrer"
+      title="Open this node in Figma"
+      className="shrink-0 text-[10px] text-neutral-400 hover:text-neutral-600 hover:underline"
+    >
+      Figma ↗
+    </a>
   );
 }

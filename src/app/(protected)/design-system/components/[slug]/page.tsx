@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
-import { designComponent } from "@/db/schema";
+import { designComponent, workspace } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { formatRelativeTime } from "@/lib/format-relative-time";
+import { figmaNodeUrl } from "@/lib/figma/links";
 import { storybookDefaultStoryId } from "@/lib/design-system-codegen/component";
 import { ResyncComponentButton } from "./resync-component-button";
 import { DeleteComponentButton } from "../delete-component-button";
@@ -32,7 +33,16 @@ async function loadComponent(slug: string) {
     .from(designComponent)
     .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.slug, slug)))
     .limit(1);
-  return component;
+  if (!component) return { component: undefined, figmaFileKey: undefined };
+
+  // Only needed to build the "open in Figma" links below -- a second,
+  // cheap single-column select rather than widening the component query.
+  const [ws] = await db
+    .select({ figmaFileKey: workspace.figmaFileKey })
+    .from(workspace)
+    .where(eq(workspace.id, workspaceId))
+    .limit(1);
+  return { component, figmaFileKey: ws?.figmaFileKey ?? undefined };
 }
 
 export default async function DesignComponentDetailPage({
@@ -41,7 +51,7 @@ export default async function DesignComponentDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const component = await loadComponent(slug);
+  const { component, figmaFileKey } = await loadComponent(slug);
   if (!component) notFound();
 
   return (
@@ -118,7 +128,24 @@ export default async function DesignComponentDetailPage({
 
       {component.figmaNodeIds.length > 0 && (
         <section className="text-xs text-neutral-400">
-          Figma node IDs: {component.figmaNodeIds.join(", ")}
+          Figma node IDs:{" "}
+          {component.figmaNodeIds.map((id, i) => (
+            <span key={id}>
+              {i > 0 && ", "}
+              {figmaFileKey ? (
+                <a
+                  href={figmaNodeUrl(figmaFileKey, id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hover:text-neutral-600 hover:underline"
+                >
+                  {id}
+                </a>
+              ) : (
+                id
+              )}
+            </span>
+          ))}
         </section>
       )}
     </div>
