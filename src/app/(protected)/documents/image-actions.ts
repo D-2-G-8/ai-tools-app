@@ -1,6 +1,6 @@
 "use server";
 
-import { put } from "@vercel/blob";
+import { put } from "@/lib/storage";
 
 /**
  * Uploads a single image (screenshot/photo the user attaches while editing a

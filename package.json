@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "tsx src/db/scripts/migrate.ts && next build",
+    "build:docker": "next build",
     "start": "next start",
     "lint": "eslint",
     "db:migrate": "tsx src/db/scripts/migrate.ts",
@@ -16,6 +17,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.16",
     "@auth/drizzle-adapter": "^1.11.2",
+    "@aws-sdk/client-s3": "^3.1090.0",
     "@vercel/blob": "^2.6.1",
     "ai": "^7.0.31",
     "bpmn-js": "^18.21.0",
@@ -30,19 +32,19 @@
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.23.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
-    "tailwindcss": "^4",
-    "tsx": "^4.23.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5"
   }
 }

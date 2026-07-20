@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { put, del } from "@vercel/blob";
+import { put, del } from "@/lib/storage";
 import { db } from "@/db";
 import { mockup } from "@/db/schema";
 import { eq } from "drizzle-orm";

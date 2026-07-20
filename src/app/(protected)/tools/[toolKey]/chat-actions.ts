@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { put, del } from "@vercel/blob";
+import { put, del } from "@/lib/storage";
 import { generateText } from "ai";
 import { db } from "@/db";
 import {

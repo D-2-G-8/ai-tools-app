@@ -22,6 +22,9 @@ uploaded documents and project context. At this stage, only `.md` document uploa
 - Registry of 6 tools (`src/lib/tools/registry.ts`) — Business Requirements and AI Review (code review) are fully
   built with their own UI; the rest (System Analysis, Design, Code Generation, Automated Tests) are stubs with
   placeholder prompts, awaiting their own implementation
+- **Self-hosted deployment** (Docker + docker-compose, `Dockerfile`/`docker-compose.yml`) as an alternative to
+  Vercel — same codebase, chosen via `STORAGE_DRIVER` (S3-compatible storage instead of Vercel Blob) and a
+  couple of env vars; see "Self-hosted deployment (Docker)" below
 
 ## Running locally
 
@@ -95,6 +98,55 @@ in with Google.
 For a rough infrastructure cost estimate under light single-user load, see `PLAN.md`, section 11
 (in short: ~$20/mo baseline + variable LLM-call costs, typically $30–60/mo total).
 
+## Self-hosted deployment (Docker)
+
+An alternative to Vercel for when the app needs native network access to something Vercel's serverless
+functions can't reach — for example, a corporate GitLab instance that only resolves on an internal DNS zone
+(see AI Review's known limitation below). Same codebase, same features — file storage is the only thing that
+changes, since Vercel Blob only exists on Vercel: self-hosted uses S3-compatible storage instead (a bundled
+MinIO container by default, or point at real AWS S3), selected via `STORAGE_DRIVER` (see `src/lib/storage/`).
+
+**Prerequisites:**
+
+- Docker and Docker Compose v2.
+- A reverse proxy in front of the `app` container doing HTTPS termination (Caddy, nginx, Traefik, your
+  corporate load balancer — anything). **This is not optional**: the session cookie that holds the GitLab/LLM
+  tokens is marked `secure` (see `src/lib/session.ts`), so sign-in silently fails over plain HTTP.
+- Google OAuth credentials (see "Authentication setup" above — same setup either way, just add the
+  self-hosted domain's callback URL too).
+- Network reachability from wherever the container runs to anything it needs to reach internally (GitLab,
+  etc.) — this is the whole reason to choose this deployment path over Vercel.
+
+**Quick start:**
+
+```bash
+cp .env.example .env   # fill in the values -- see the variable reference below
+docker compose up -d --build
+```
+
+The first boot (and every subsequent restart) automatically applies pending DB migrations before starting the
+server (`docker-entrypoint.sh` — idempotent, safe to re-run, same migration script Vercel's build step already
+uses). The bundled `minio-init` service creates the storage bucket and makes it public-read on first boot too
+— nothing else needs to be run by hand.
+
+**Environment variables (docker-compose-specific, on top of the shared ones in the table above):**
+
+| Variable              | Purpose                                                                 |
+| ---------------------- | ------------------------------------------------------------------------ |
+| `STORAGE_DRIVER`      | Set to `s3` for self-hosted (unset/`vercel-blob` is the Vercel default) |
+| `POSTGRES_USER/PASSWORD/DB` | Credentials for the bundled `postgres` service — `POSTGRES_URL` is built from these automatically |
+| `MINIO_ROOT_USER/PASSWORD` | Credentials for the bundled `minio` service (also used as `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`) |
+| `MINIO_BUCKET`        | Bucket name, created automatically on first boot                       |
+| `S3_ENDPOINT/REGION/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY/FORCE_PATH_STYLE` | Only needed if pointing at something other than the bundled MinIO (e.g. real AWS S3 — see note below) |
+
+**Using real AWS S3 instead of the bundled MinIO:** set `STORAGE_DRIVER=s3` and the `S3_*` variables directly
+(skip the `minio`/`minio-init` services, or just ignore them). The `minio-init` service's automatic
+bucket-creation-and-public-read setup only applies to the bundled MinIO — pointing at real S3 requires
+manually creating the bucket and an equivalent public-read bucket policy yourself.
+
+**Updating:** `docker compose build app && docker compose up -d app` — migrations re-run safely on every
+start, so there's no separate migration step to remember.
+
 ## Known limitations of this version (things to revisit)
 
 - **File upload is synchronous** — ingestion (parsing/chunking/embeddings) runs right inside the Server
@@ -107,12 +159,13 @@ For a rough infrastructure cost estimate under light single-user load, see `PLAN
   user input + retrieved context, without parsing `{{variables}}` out of the prompt text. A proper
   templating engine is worth building when we work through the individual tools separately (see PLAN.md
   section 8, phase 4).
-- **AI Review depends on GitLab being reachable from Vercel's serverless functions.** A self-hosted GitLab
-  instance that's only reachable over a VPN or internal network won't work — Vercel's functions run outside
-  that network and the request will simply fail (see `describeGitlabError` in `src/lib/gitlab/client.ts` for
-  the error message you'd see). Diffs are truncated at ~100K characters (not all changes get analyzed on very
-  large MRs), and V3's "full context" is limited to whichever documents you explicitly select per review, not
-  auto-detected.
+- **AI Review depends on GitLab being reachable from wherever the app runs.** A self-hosted GitLab instance
+  that's only reachable over a VPN or internal network won't be reachable from Vercel's serverless functions —
+  the request will simply fail (see `describeGitlabError` in `src/lib/gitlab/client.ts` for the error message
+  you'd see). The self-hosted deployment (see above) exists specifically to solve this — run the container
+  somewhere with native network access to GitLab instead. Diffs are truncated at ~100K characters (not all
+  changes get analyzed on very large MRs), and V3's "full context" is limited to whichever documents you
+  explicitly select per review, not auto-detected.
 - **No invite emails are sent** — inviting a teammate from `/company` just records the invite; the owner
   has to tell them out-of-band, and the invite only activates once they sign in with Google using that exact
   email address.
@@ -154,6 +207,7 @@ src/
     presence.ts     "Online now" freshness window + isOnline() helper
     gitlab/client.ts    Plain-fetch GitLab REST v4 client (list MRs, fetch diff, post comment)
     code-review/    AI Review engines -- prompts, v1/v2/v3 review logic, MR-comment formatting
+    storage/        File storage driver (Vercel Blob or S3-compatible, picked via STORAGE_DRIVER)
   app/
     sign-in/        Google sign-in page
     onboarding/     Create/join a company (after first sign-in)
