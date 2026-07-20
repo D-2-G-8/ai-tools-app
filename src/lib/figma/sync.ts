@@ -257,7 +257,12 @@ async function fetchNodesBatched(fileKey: string, accessToken: string, nodeIds: 
     const responses = await Promise.all(
       slice.map((ids) =>
         figmaGet<FigmaFileNodesResponse>(
-          `/files/${encodeURIComponent(fileKey)}/nodes?ids=${ids.map(encodeURIComponent).join(",")}`,
+          // depth=1: every caller only reads a node's own properties (a style's
+          // fills) or its DIRECT children (a component set's variant list) --
+          // never grandchildren. Without it, fetching the component-set nodes
+          // returns each set's FULL subtree (~52MB for this file's 108 sets),
+          // which blows the request timeout / route budget on the metadata sync.
+          `/files/${encodeURIComponent(fileKey)}/nodes?ids=${ids.map(encodeURIComponent).join(",")}&depth=1`,
           accessToken,
           FIGMA_FILE_FETCH_TIMEOUT_MS,
         ),

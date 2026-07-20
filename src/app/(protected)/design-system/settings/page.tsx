@@ -19,6 +19,7 @@ import { ResyncTokensButton } from "./resync-tokens-button";
 import { ResyncComponentsButton } from "./resync-components-button";
 import { ClearAllButton } from "../clear-all-button";
 import { loadComponentSlugsForWorkspace, loadCleanupCounts } from "@/lib/design-system-codegen/data";
+import { reconcilePendingPr } from "@/lib/design-system-codegen/reconcile";
 
 export const dynamic = "force-dynamic";
 // Note: the actual Figma sync (previously a slow Server Action here, hence
@@ -34,6 +35,10 @@ const STACK_OPTIONS = [
 
 async function loadSettingsData() {
   const workspaceId = await getCurrentWorkspaceId();
+  // Keep the "pending PR" banner honest: if that PR was merged/closed/deleted,
+  // clear the pointer before we read it. Best-effort -- a GitHub hiccup must
+  // not break the settings page.
+  await reconcilePendingPr(workspaceId).catch(() => {});
   const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
   const figma = await getFigmaConnectionStatus();
   const components = await loadComponentSlugsForWorkspace(workspaceId);

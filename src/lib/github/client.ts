@@ -183,6 +183,25 @@ export async function branchExists(branch: string): Promise<boolean> {
   return (await getBranchSha(branch)) !== null;
 }
 
+export type PullRequestState = "open" | "closed" | "merged" | "missing";
+
+/**
+ * The current state of a PR by number: "open", "merged", "closed" (closed
+ * without merging), or "missing" (deleted / never existed). Used to keep the
+ * "pending PR" banner honest -- a merged/closed/deleted PR is no longer pending.
+ */
+export async function getPullRequestState(prNumber: number): Promise<PullRequestState> {
+  const { owner, repo } = getConfig();
+  try {
+    const pr = await githubFetch<{ state: string; merged?: boolean }>(`/repos/${owner}/${repo}/pulls/${prNumber}`);
+    if (pr.merged) return "merged";
+    return pr.state === "open" ? "open" : "closed";
+  } catch (err) {
+    if (err instanceof Error && /returned 404/.test(err.message)) return "missing";
+    throw err;
+  }
+}
+
 /**
  * Every file path present on a branch (recursive tree), or null if the branch
  * doesn't exist. Used to reconcile the DB's "committed" claims against what's
