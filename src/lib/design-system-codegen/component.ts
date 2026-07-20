@@ -262,16 +262,16 @@ async function generateStories(
         "the `Default` story EXACTLY as shown -- the platform deep-links to this specific story id):",
       "```",
       'import type { Meta, StoryObj } from "@storybook/react";',
-      'import { Button } from "./Button";',
+      'import { Button as Component } from "./Button";',
       "",
-      "const meta: Meta<typeof Button> = {",
+      "const meta: Meta<typeof Component> = {",
       `  title: "Components/${componentName}",`,
-      "  component: Button,",
+      "  component: Component,",
       '  args: { children: "Button" },',
       "};",
       "export default meta;",
       "",
-      "type Story = StoryObj<typeof Button>;",
+      "type Story = StoryObj<typeof Component>;",
       "",
       "export const Default: Story = {};",
       'export const Primary: Story = { args: { variant: "primary" } };',
@@ -281,6 +281,15 @@ async function generateStories(
         "canonical story the component detail page embeds. Beyond that, add one story per meaningfully " +
         "distinct variant/state combination -- don't enumerate every possible cross-product if that would " +
         "be excessive, use judgment for what's useful to preview.",
+      "",
+      `ALWAYS import the component under the alias "Component", exactly as shown above (\`import { ${componentName} as Component } from "./${componentName}"\`) -- ` +
+        "never under its own bare name. A story is always exported as `Default`, and some components may also " +
+        `end up with a variant/state story that happens to share the component's own name (e.g. a component ` +
+        'called "Default" or "Primary") -- importing the component bare in that case declares two top-level ' +
+        "bindings with the same identifier in one module, which Babel refuses to parse at all (confirmed in " +
+        "production: a component named \"Default\" broke the whole Storybook build this way). Aliasing the " +
+        "import to a fixed, neutral name sidesteps this category of collision entirely, regardless of what the " +
+        "component itself is named.",
     ].join("\n"),
   });
   return {
@@ -351,11 +360,53 @@ export function checkClassNamesMatch(tsxContent: string, cssContent: string): Cl
   return { ok: missingClasses.length === 0, missingClasses };
 }
 
+export interface StoriesCheckResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * Deterministic (no LLM) safety check for the generated .stories.tsx:
+ * catches the "Duplicate declaration" Babel/react-docgen parse error that
+ * breaks Storybook's build entirely (confirmed in production -- a
+ * component named "Default" produced `import { Default } from
+ * "./Default"` alongside the mandatory `export const Default: Story`,
+ * two top-level bindings named `Default` in one module, which Storybook
+ * refuses to even parse). generateStories's prompt now always instructs
+ * an aliased import (`import { X as Component } from "./X"`) specifically
+ * to avoid this -- not just for a component literally named "Default",
+ * but any component whose name happens to match one of its own
+ * variant/state stories (e.g. "Primary") -- but since that's an LLM
+ * instruction, not a guarantee, this check catches it deterministically
+ * before anything commits, same as checkClassNamesMatch above.
+ */
+export function checkStoriesNoNameCollision(storiesContent: string, componentName: string): StoriesCheckResult {
+  const escaped = componentName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const bareImport = new RegExp(`import\\s*\\{\\s*${escaped}\\s*\\}\\s*from\\s*["']\\./${escaped}["']`);
+  if (!bareImport.test(storiesContent)) return { ok: true };
+
+  const exportedNames = new Set<string>();
+  for (const m of storiesContent.matchAll(/export\s+const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*:/g)) exportedNames.add(m[1]);
+
+  if (exportedNames.has(componentName)) {
+    return {
+      ok: false,
+      reason:
+        `The stories file imports the component under its own bare name ("${componentName}") while also ` +
+        `exporting a story called "${componentName}" -- two top-level bindings with the same identifier, ` +
+        "which breaks the Storybook build's parse step entirely. Not committing.",
+    };
+  }
+  return { ok: true };
+}
+
 /**
  * Generates one component's full file set. Throws (does not commit
  * anything itself -- that's the caller's job, see the codegen route) if
- * the deterministic class-name check fails, since committing mismatched
- * TSX/CSS would ship a component that renders unstyled.
+ * the deterministic class-name check or the stories name-collision check
+ * fails, since committing mismatched TSX/CSS would ship a component that
+ * renders unstyled, and committing a colliding stories file would break
+ * the whole Storybook build for everyone, not just this one component.
  */
 export async function generateComponentCode(
   model: string,
@@ -384,6 +435,11 @@ export async function generateComponentCode(
       `Generated ${componentName}: TSX references CSS Modules classes not defined in the stylesheet -- ` +
         `${check.missingClasses.join(", ")}. Not committing a mismatched component.`,
     );
+  }
+
+  const storiesCheck = checkStoriesNoNameCollision(stories.content, componentName);
+  if (!storiesCheck.ok) {
+    throw new Error(`Generated ${componentName}: ${storiesCheck.reason}`);
   }
 
   const inputTokens = t1 + tsx.inputTokens + css.inputTokens + stories.inputTokens;
