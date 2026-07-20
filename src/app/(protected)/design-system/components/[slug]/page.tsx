@@ -124,7 +124,7 @@ export default async function DesignComponentDetailPage({
         </div>
       </section>
 
-      <DesignSystemPreview slug={component.slug} codeSyncStatus={component.codeSyncStatus} />
+      <DesignSystemPreview slug={component.slug} isIcon={component.isIcon} codeSyncStatus={component.codeSyncStatus} />
 
       {component.figmaNodeIds.length > 0 && (
         <section className="text-xs text-neutral-400">
@@ -164,7 +164,15 @@ export default async function DesignComponentDetailPage({
  * deterministic title. "Open in Storybook" links to the full UI so
  * someone can browse the component's other variant/state stories too.
  */
-function DesignSystemPreview({ slug, codeSyncStatus }: { slug: string; codeSyncStatus: string }) {
+function DesignSystemPreview({
+  slug,
+  isIcon,
+  codeSyncStatus,
+}: {
+  slug: string;
+  isIcon: boolean;
+  codeSyncStatus: string;
+}) {
   const storybookUrl = process.env.DESIGN_SYSTEM_STORYBOOK_URL?.replace(/\/+$/, "");
 
   if (!storybookUrl) {
@@ -188,7 +196,7 @@ function DesignSystemPreview({ slug, codeSyncStatus }: { slug: string; codeSyncS
     );
   }
 
-  const storyId = storybookDefaultStoryId(slug);
+  const storyId = storybookDefaultStoryId(slug, isIcon);
 
   return (
     <section className="rounded-lg border border-neutral-200 bg-white p-5">

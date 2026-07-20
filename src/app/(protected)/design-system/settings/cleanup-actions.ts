@@ -61,7 +61,7 @@ export async function clearCodeSyncedComponents(): Promise<ClearCodeSyncedResult
   try {
     const branchName = await getOrOpenSessionBranch(workspaceId);
     const files: CommitFile[] = committed.flatMap((c) => {
-      const paths = componentSourcePaths(c.slug);
+      const paths = componentSourcePaths(c.slug, c.isIcon);
       return [
         { path: paths.tsxPath, content: null },
         { path: paths.cssPath, content: null },

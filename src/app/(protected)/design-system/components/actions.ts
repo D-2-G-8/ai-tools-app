@@ -51,7 +51,7 @@ export async function deleteComponent(slug: string): Promise<DeleteComponentResu
 
   if (component.codeSyncStatus === "committed") {
     try {
-      const paths = componentSourcePaths(component.slug);
+      const paths = componentSourcePaths(component.slug, component.isIcon);
       const branchName = await getOrOpenSessionBranch(workspaceId);
       await commitFiles(branchName, `Remove ${paths.componentName}`, [
         { path: paths.tsxPath, content: null },

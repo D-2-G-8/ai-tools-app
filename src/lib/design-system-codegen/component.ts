@@ -44,6 +44,13 @@ export interface ComponentForCodegen {
   description?: string;
   variants: DesignComponentVariant[];
   states: DesignComponentState[];
+  /**
+   * True for a single-glyph SVG icon (design_component.isIcon, set by Figma
+   * sync's isLikelyIconName heuristic). Icons are generated into a separate
+   * `src/icons/<slug>/` folder and grouped under Storybook's "Icons/" section
+   * instead of "Components/" -- everything else about the pipeline is the same.
+   */
+  isIcon: boolean;
 }
 
 export interface GeneratedComponentFiles {
@@ -112,14 +119,18 @@ export interface ComponentSourcePaths {
 /**
  * The exact repo-relative paths a component's generated files live at,
  * derived purely from its slug (same pascalCase(slug) generateComponentCode
- * uses). Single source of truth for both writing those paths (below) and
- * deleting them (design-system/components/actions.ts, settings/cleanup-
- * actions.ts's "remove code-synced component(s)" flow) -- so a rename of
- * this convention can't silently desync the two.
+ * uses) and its isIcon flag. Single source of truth for both writing those
+ * paths (below) and deleting them (design-system/components/actions.ts,
+ * settings/cleanup-actions.ts's "remove code-synced component(s)" flow) --
+ * so a rename of this convention can't silently desync the two.
+ *
+ * Icons (isIcon) live under `src/icons/<slug>/`, everything else under
+ * `src/components/<slug>/`. Callers MUST pass the component's own isIcon so
+ * writes and deletes always target the same folder.
  */
-export function componentSourcePaths(slug: string): ComponentSourcePaths {
+export function componentSourcePaths(slug: string, isIcon: boolean): ComponentSourcePaths {
   const componentName = pascalCase(slug);
-  const dir = `src/components/${slug}`;
+  const dir = `src/${isIcon ? "icons" : "components"}/${slug}`;
   return {
     dir,
     componentName,
@@ -246,6 +257,11 @@ async function generateStories(
   contract: ComponentContract,
   componentName: string,
 ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
+  // Icons get their own "Icons/" Storybook section (mirrors the src/icons/
+  // folder split and the app's separate Icons tab); everything else is a
+  // "Components/" story. storybookDefaultStoryId derives the id from the
+  // same rule, so the detail page's deep-link stays correct.
+  const section = component.isIcon ? "Icons" : "Components";
   const anthropic = await getAnthropicClient();
   const result = await generateText({
     model: anthropic(model),
@@ -265,7 +281,7 @@ async function generateStories(
       'import { Button as Component } from "./Button";',
       "",
       "const meta: Meta<typeof Component> = {",
-      `  title: "Components/${componentName}",`,
+      `  title: "${section}/${componentName}",`,
       "  component: Component,",
       '  args: { children: "Button" },',
       "};",
@@ -276,7 +292,7 @@ async function generateStories(
       "export const Default: Story = {};",
       'export const Primary: Story = { args: { variant: "primary" } };',
       "```",
-      `REQUIRED: title must be exactly "Components/${componentName}", and there must be exactly one story ` +
+      `REQUIRED: title must be exactly "${section}/${componentName}", and there must be exactly one story ` +
         'exported as `Default` (using the component\'s default args, like the example above) -- this is the ' +
         "canonical story the component detail page embeds. Beyond that, add one story per meaningfully " +
         "distinct variant/state combination -- don't enumerate every possible cross-product if that would " +
@@ -419,7 +435,7 @@ export async function generateComponentCode(
   // fully derivable from component.slug alone, which is what the
   // component detail page's Storybook iframe link needs (see
   // src/app/(protected)/design-system/components/[slug]/page.tsx).
-  const paths = componentSourcePaths(component.slug);
+  const paths = componentSourcePaths(component.slug, component.isIcon);
   const componentName = paths.componentName;
   const { contract, inputTokens: t1, outputTokens: o1 } = await generateContract(model, component, availableTokens);
 
@@ -475,11 +491,12 @@ export async function generateComponentCode(
  * componentName is PascalCase with no separators to strip (only case),
  * sanitizing it is equivalent to just lowercasing component.slug with its
  * own hyphens/underscores removed -- so this is derivable from
- * component.slug alone, with no need to inspect any generated file. Used
- * by the component detail page to embed a Storybook iframe (see
- * DESIGN_SYSTEM_STORYBOOK_URL in .env.example).
+ * component.slug (+ its isIcon flag, which picks the "icons"/"components"
+ * title prefix generateStories uses) alone, with no need to inspect any
+ * generated file. Used by the component detail page to embed a Storybook
+ * iframe (see DESIGN_SYSTEM_STORYBOOK_URL in .env.example).
  */
-export function storybookDefaultStoryId(slug: string): string {
+export function storybookDefaultStoryId(slug: string, isIcon: boolean): string {
   const sanitizedComponentName = pascalCase(slug).toLowerCase();
-  return `components-${sanitizedComponentName}--default`;
+  return `${isIcon ? "icons" : "components"}-${sanitizedComponentName}--default`;
 }

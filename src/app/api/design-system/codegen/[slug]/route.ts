@@ -75,6 +75,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       description: component.description ?? undefined,
       variants: component.variants,
       states: component.states,
+      isIcon: component.isIcon,
     };
     const generated = await generateComponentCode(model, forCodegen, tokens);
 
