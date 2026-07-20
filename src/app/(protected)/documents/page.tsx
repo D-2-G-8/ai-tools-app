@@ -49,7 +49,7 @@ export default async function DocumentsPage() {
 
         <section className="rounded-lg border border-neutral-200 bg-white p-5">
           <h2 className="text-sm font-medium text-neutral-700 mb-4">Upload .md files</h2>
-          <form action={uploadDocument} encType="multipart/form-data" className="flex items-center gap-3">
+          <form action={uploadDocument} className="flex items-center gap-3">
             <input
               type="file"
               name="file"

@@ -36,7 +36,7 @@ export default async function MockupsPage() {
     <div className="flex flex-col gap-8">
       <section className="rounded-lg border border-neutral-200 bg-white p-5">
         <h2 className="text-sm font-medium text-neutral-700 mb-4">Upload .html mockups</h2>
-        <form action={uploadMockup} encType="multipart/form-data" className="flex items-center gap-3">
+        <form action={uploadMockup} className="flex items-center gap-3">
           <input type="file" name="file" accept=".html,text/html" required multiple className="text-sm" />
           <button
             type="submit"
