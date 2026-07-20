@@ -37,7 +37,7 @@ export function SyncFromFigma() {
         value={urls}
         onChange={(e) => setUrls(e.target.value)}
         rows={3}
-        placeholder="Paste Figma screen URLs, one per line — or leave empty to auto-discover screens from non-service pages"
+        placeholder="Paste Figma URLs (one per line) — a screen or a whole flow board; boards are expanded to their individual screens"
         className="w-full rounded-md border border-neutral-300 px-3 py-2 font-mono text-xs"
       />
       <button

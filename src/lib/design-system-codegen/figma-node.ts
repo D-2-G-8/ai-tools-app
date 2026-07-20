@@ -45,6 +45,7 @@ export interface FigmaNode {
   cornerRadius?: number;
   rectangleCornerRadii?: number[];
   layoutMode?: "HORIZONTAL" | "VERTICAL" | "NONE";
+  clipsContent?: boolean;
   itemSpacing?: number;
   paddingLeft?: number;
   paddingRight?: number;

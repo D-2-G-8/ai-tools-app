@@ -7,13 +7,10 @@ import { db } from "@/db";
 import { mockup } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
-import { workspace } from "@/db/schema";
-import { getValidFigmaAccessToken } from "@/lib/figma/client";
 import {
-  parseFigmaNodeId,
-  discoverScreenFrames,
+  parseFigmaRef,
   syncMockupsFromFigma,
-  type ScreenFrame,
+  type FigmaRef,
   type SyncMockupsResult,
 } from "@/lib/design-system-codegen/mockup-sync";
 
@@ -61,31 +58,25 @@ export async function uploadMockup(formData: FormData) {
 }
 
 /**
- * Imports existing app screens from Figma as reference mockups. Uses the Figma
- * frame URLs pasted in `urls` (one per line); if none are given, auto-discovers
- * screen frames from the file's non-service pages. See mockup-sync.ts.
+ * Imports existing app screens from Figma as reference mockups. Takes Figma
+ * URLs (one per line) pointing at screens or whole flow boards -- each is
+ * expanded to its individual screen frames. Screens live in per-feature files,
+ * so the file key is read from each URL. See mockup-sync.ts.
  */
 export async function syncMockupsFromFigmaAction(
   urls: string,
 ): Promise<SyncMockupsResult & { error?: string }> {
   const workspaceId = await getCurrentWorkspaceId();
   try {
-    const manual: ScreenFrame[] = urls
-      .split(/[\s,]+/)
-      .map((u) => parseFigmaNodeId(u))
-      .filter((id): id is string => Boolean(id))
-      .map((nodeId) => ({ nodeId, name: "" }));
-
-    let frames = manual;
-    if (frames.length === 0) {
-      const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
-      const token = await getValidFigmaAccessToken();
-      if (!ws?.figmaFileKey || !token) throw new Error("Figma isn't connected, and no frame URLs were provided.");
-      frames = await discoverScreenFrames(ws.figmaFileKey, token);
+    const refs: FigmaRef[] = urls
+      .split(/[\r\n]+/)
+      .map((line) => parseFigmaRef(line))
+      .filter((r): r is FigmaRef => Boolean(r));
+    if (refs.length === 0) {
+      throw new Error("Couldn't parse any Figma screen/board URLs. Paste links with a node-id, one per line.");
     }
-    if (frames.length === 0) throw new Error("No screen frames found to import.");
 
-    const result = await syncMockupsFromFigma(workspaceId, frames);
+    const result = await syncMockupsFromFigma(workspaceId, refs);
     revalidatePath("/design-system/mockups");
     return result;
   } catch (err) {
