@@ -4,14 +4,14 @@ import { eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { getFigmaConnectionStatus } from "@/lib/session";
 import { SetupNotice } from "@/components/setup-notice";
-import { saveDesignSettings, disconnectFigma, syncFigmaDesignSystem } from "./actions";
+import { saveDesignSettings, disconnectFigma } from "./actions";
+import { FigmaSyncButton } from "./figma-sync-button";
 
 export const dynamic = "force-dynamic";
-// Sync now (see actions.ts) fetches the whole Figma file, which can take a
-// while for a large/complex file (see client.ts's FIGMA_FILE_FETCH_TIMEOUT_MS) --
-// give the Server Action the same longer allowance the other slow actions in
-// this app already get (documents/page.tsx, mockups/page.tsx).
-export const maxDuration = 60;
+// Note: the actual Figma sync (previously a slow Server Action here, hence
+// a maxDuration bump) now streams from src/app/api/figma/sync/route.ts,
+// which carries its own maxDuration -- this page's remaining actions
+// (save settings, disconnect) are fast, so no bump needed here.
 
 const STACK_OPTIONS = [
   { value: "react-scss", label: "React + SCSS" },
@@ -41,17 +41,6 @@ function FigmaResultBanner({
   }
   if (status === "disconnected") {
     return <p className="rounded-md bg-neutral-100 px-3 py-2 text-sm text-neutral-600">Figma disconnected.</p>;
-  }
-  if (status === "synced") {
-    const tokens = typeof sp.tokens === "string" ? sp.tokens : "0";
-    const skipped = typeof sp.skipped === "string" ? sp.skipped : "0";
-    const components = typeof sp.components === "string" ? sp.components : "0";
-    return (
-      <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-        Synced {tokens} token(s) and {components} component(s) from Figma
-        {skipped !== "0" && ` (${skipped} style(s) couldn't be resolved to a value and were skipped)`}.
-      </p>
-    );
   }
   if (status === "error") {
     const message = typeof sp.figmaMessage === "string" ? sp.figmaMessage : "Something went wrong.";
@@ -158,14 +147,7 @@ export default async function DesignSettingsPage({
 
         <div className="mt-4 border-t border-neutral-100 pt-4">
           {canSync ? (
-            <form action={syncFigmaDesignSystem}>
-              <button
-                type="submit"
-                className="rounded-md border border-neutral-300 px-4 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
-              >
-                Sync now
-              </button>
-            </form>
+            <FigmaSyncButton />
           ) : (
             <p className="text-xs text-neutral-400">
               {figma.connected

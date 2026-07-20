@@ -20,12 +20,18 @@ const FIGMA_TOKEN_URL = "https://api.figma.com/v1/oauth/token";
 const FIGMA_REFRESH_URL = "https://api.figma.com/v1/oauth/refresh";
 
 // current_user:read -- for the "Connected as: ..." display in Settings.
-// file_content:read -- read a file's document tree + styles (design tokens
-// and components sync, see src/lib/figma/sync.ts). Deliberately NOT
-// requesting file_variables:read/write: that scope is Enterprise-plan-only,
-// and requesting a scope the workspace's Figma plan doesn't support would
-// break the connect flow for anyone not on Enterprise.
-export const FIGMA_OAUTH_SCOPES = "current_user:read,file_content:read";
+// file_content:read -- fallback full-file read (src/lib/figma/sync.ts's
+// syncViaFullFileWalk) for files that aren't published as a Figma library.
+// library_content:read -- the fast path: GET /v1/files/:key/{styles,
+// components,component_sets}, confirmed (developers.figma.com/docs/rest-api/
+// component-endpoints/: "requires the library_content:read scope") to be
+// the correct single scope for these three lightweight listing endpoints --
+// the OpenAPI spec also pairs them with the now-removed legacy files:read,
+// which is backward-compat noise, not a real second requirement.
+// Deliberately NOT requesting file_variables:read/write: that scope is
+// Enterprise-plan-only, and requesting a scope the workspace's Figma plan
+// doesn't support would break the connect flow for anyone not on Enterprise.
+export const FIGMA_OAUTH_SCOPES = "current_user:read,file_content:read,library_content:read";
 
 interface FigmaClientCredentials {
   clientId: string;

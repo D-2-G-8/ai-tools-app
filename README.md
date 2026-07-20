@@ -95,19 +95,33 @@ signed into the app with. Nobody needs to standardize accounts across systems to
 
 One-time setup, done once by whoever manages this deployment:
 
-1. In [Figma](https://www.figma.com/developers/apps), create a new OAuth app (Settings → Apps).
-2. Add redirect URIs: `https://<your-domain>/api/figma/oauth/callback` for production, and
+1. In [Figma](https://www.figma.com/developers/apps), create a new OAuth app (Settings → Apps) -- if this is
+   for one company/team's own files, set the app's **Audience** to "Private" (scoped to your Figma team, no
+   Figma review needed); only use "Public" if people outside your team need to connect too, which requires
+   Figma's app review.
+2. On that app's **OAuth scopes** page (separate from anything set at connect time), enable
+   `current_user:read`, `file_content:read`, and `library_content:read`. This is required -- an app with a
+   scope requested at connect time but not enabled here fails with `{"error":true,"status":400,"message":
+   "Invalid scopes for app"}`. Figma also requires a short description of why each scope is needed when you
+   enable it, e.g. "Show which Figma account is connected" for `current_user:read`, and "Read a file's
+   published styles/components (and, as a fallback, its full document tree) to sync the design system" for
+   `library_content:read`/`file_content:read`.
+3. Add redirect URIs: `https://<your-domain>/api/figma/oauth/callback` for production, and
    `http://localhost:3000/api/figma/oauth/callback` for local dev -- both can be registered on the same app.
-3. Set `FIGMA_CLIENT_ID` and `FIGMA_CLIENT_SECRET` (Vercel Project Settings → Environment Variables, or
+4. Set `FIGMA_CLIENT_ID` and `FIGMA_CLIENT_SECRET` (Vercel Project Settings → Environment Variables, or
    `.env`/`.env.local`), then redeploy/restart.
-4. Each person then connects their own account from `/design-system/settings` → "Connect Figma". The
-   requested scopes are `current_user:read` (for the "Connected as: ..." display) and `file_content:read`
-   (to read a file's styles/components for sync) -- deliberately not `file_variables:read`, since Figma
-   Variables are an Enterprise-plan-only API and requesting a scope your plan doesn't support would break the
-   connect flow.
+5. Each person then connects their own account from `/design-system/settings` → "Connect Figma". The
+   requested scopes are `current_user:read` (for the "Connected as: ..." display), `library_content:read`
+   (the fast path -- `GET /v1/files/:key/{styles,components,component_sets}`, used when the file is published
+   as a Figma library) and `file_content:read` (fallback: a full-document-tree read, used only when the file
+   isn't published as a library) -- deliberately not `file_variables:read`, since Figma Variables are an
+   Enterprise-plan-only API and requesting a scope your plan doesn't support would break the connect flow.
 
 Figma access tokens last 90 days and refresh automatically in the background while connected; if a sync ever
-fails with a connection error, just reconnect from Settings.
+fails with a connection error, just reconnect from Settings. **If you already connected Figma before
+`library_content:read` was added to this app's requested scopes, reconnect once** ("Disconnect" then
+"Connect Figma" again in Settings) -- an existing session's token was issued under the old, narrower scope
+set and won't pick up the new one on its own.
 
 ## Deploying to Vercel
 
