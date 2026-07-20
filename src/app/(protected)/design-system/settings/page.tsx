@@ -10,6 +10,7 @@ import { clearUnsyncedComponents, clearCodeSyncedComponents, clearUnsyncedTokens
 import { FigmaSyncButton } from "./figma-sync-button";
 import { DesignSystemCodegenPanel } from "./design-system-codegen-panel";
 import { ResyncTokensButton } from "./resync-tokens-button";
+import { ResyncComponentsButton } from "./resync-components-button";
 import { ClearAllButton } from "../clear-all-button";
 import { loadComponentSlugsForWorkspace, loadCleanupCounts } from "@/lib/design-system-codegen/data";
 
@@ -159,6 +160,7 @@ export default async function DesignSettingsPage({
             <>
               <FigmaSyncButton />
               <ResyncTokensButton />
+              <ResyncComponentsButton />
             </>
           ) : (
             <p className="text-xs text-neutral-400">

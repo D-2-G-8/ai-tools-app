@@ -507,6 +507,94 @@ async function upsertComponent(workspaceId: string, group: ResolvedComponentGrou
     });
 }
 
+// ---- Component grouping (shared by full sync, resyncComponentsFromFigma) ----
+
+/**
+ * Builds this file's component groups from the fast path's lightweight
+ * listing endpoints (already-fetched component/component_set lists) --
+ * batches a node fetch for just the component_sets (to read their variant
+ * children), splits out standalone components (ones not already claimed
+ * as a set's child), and groups via buildComponentGroups. Shared by
+ * tryFastSync (full sync) and resyncComponentsFromFigma ("Resync
+ * components" below) so the two can't resolve the same file's components
+ * differently.
+ */
+async function fetchComponentGroupsFast(
+  fileKey: string,
+  accessToken: string,
+  components: FigmaPublishedComponent[],
+  componentSets: FigmaPublishedComponentSet[],
+): Promise<ResolvedComponentGroup[]> {
+  const setNodes = await fetchNodesBatched(fileKey, accessToken, componentSets.map((s) => s.node_id));
+  const childNodeIdsInSets = new Set<string>();
+  const normalizedSets: NormalizedComponentSet[] = componentSets.map((set) => {
+    const node = setNodes.get(set.node_id);
+    const variantNodes = (node?.children ?? []).map((c) => ({ id: c.id, name: c.name }));
+    variantNodes.forEach((c) => childNodeIdsInSets.add(c.id));
+    return {
+      nodeId: set.node_id,
+      name: set.name,
+      description: set.description,
+      pageLabel: set.containing_frame?.pageName,
+      variantNodes,
+    };
+  });
+  const standalone: NormalizedStandaloneComponent[] = components
+    .filter((c) => !childNodeIdsInSets.has(c.node_id))
+    .map((c) => ({
+      nodeId: c.node_id,
+      name: c.name,
+      description: c.description,
+      pageLabel: c.containing_frame?.pageName,
+    }));
+
+  return buildComponentGroups(normalizedSets, standalone);
+}
+
+/** Same as fetchComponentGroupsFast, but from an already-fetched full-file walk's component/component_set maps. */
+function groupComponentsFromFullFile(file: FigmaFileResponse): ResolvedComponentGroup[] {
+  const byComponentSetId = new Map<string, [string, FigmaComponent][]>();
+  const standaloneEntries: [string, FigmaComponent][] = [];
+  for (const entry of Object.entries(file.components)) {
+    const [, component] = entry;
+    if (component.componentSetId) {
+      const list = byComponentSetId.get(component.componentSetId) ?? [];
+      list.push(entry);
+      byComponentSetId.set(component.componentSetId, list);
+    } else {
+      standaloneEntries.push(entry);
+    }
+  }
+
+  const normalizedSets: NormalizedComponentSet[] = Object.entries(file.componentSets).map(([setNodeId, set]) => ({
+    nodeId: setNodeId,
+    name: set.name,
+    description: set.description,
+    variantNodes: (byComponentSetId.get(setNodeId) ?? []).map(([nodeId, c]) => ({ id: nodeId, name: c.name })),
+  }));
+  const standalone: NormalizedStandaloneComponent[] = standaloneEntries.map(([nodeId, c]) => ({
+    nodeId,
+    name: c.name,
+    description: c.description,
+  }));
+
+  return buildComponentGroups(normalizedSets, standalone);
+}
+
+async function upsertComponentGroups(
+  workspaceId: string,
+  groups: ResolvedComponentGroup[],
+  onProgress: OnSyncProgress,
+): Promise<number> {
+  let componentsUpserted = 0;
+  for (let i = 0; i < groups.length; i++) {
+    await upsertComponent(workspaceId, groups[i]);
+    componentsUpserted++;
+    onProgress({ phase: "components", done: i + 1, total: groups.length });
+  }
+  return componentsUpserted;
+}
+
 // ---- Progress reporting ----
 
 export interface SyncProgressEvent {
@@ -576,36 +664,8 @@ async function tryFastSync(
   }
 
   // ---- Components ----
-  const setNodes = await fetchNodesBatched(fileKey, accessToken, componentSets.map((s) => s.node_id));
-  const childNodeIdsInSets = new Set<string>();
-  const normalizedSets: NormalizedComponentSet[] = componentSets.map((set) => {
-    const node = setNodes.get(set.node_id);
-    const variantNodes = (node?.children ?? []).map((c) => ({ id: c.id, name: c.name }));
-    variantNodes.forEach((c) => childNodeIdsInSets.add(c.id));
-    return {
-      nodeId: set.node_id,
-      name: set.name,
-      description: set.description,
-      pageLabel: set.containing_frame?.pageName,
-      variantNodes,
-    };
-  });
-  const standalone: NormalizedStandaloneComponent[] = components
-    .filter((c) => !childNodeIdsInSets.has(c.node_id))
-    .map((c) => ({
-      nodeId: c.node_id,
-      name: c.name,
-      description: c.description,
-      pageLabel: c.containing_frame?.pageName,
-    }));
-
-  const groups = buildComponentGroups(normalizedSets, standalone);
-  let componentsUpserted = 0;
-  for (let i = 0; i < groups.length; i++) {
-    await upsertComponent(workspaceId, groups[i]);
-    componentsUpserted++;
-    onProgress({ phase: "components", done: i + 1, total: groups.length });
-  }
+  const groups = await fetchComponentGroupsFast(fileKey, accessToken, components, componentSets);
+  const componentsUpserted = await upsertComponentGroups(workspaceId, groups, onProgress);
 
   return { tokensUpserted, tokensSkipped, componentsUpserted };
 }
@@ -641,38 +701,8 @@ async function syncViaFullFileWalk(
   }
   const tokensSkipped = Object.keys(file.styles).length - resolvedStyles.size;
 
-  const byComponentSetId = new Map<string, [string, FigmaComponent][]>();
-  const standaloneEntries: [string, FigmaComponent][] = [];
-  for (const entry of Object.entries(file.components)) {
-    const [, component] = entry;
-    if (component.componentSetId) {
-      const list = byComponentSetId.get(component.componentSetId) ?? [];
-      list.push(entry);
-      byComponentSetId.set(component.componentSetId, list);
-    } else {
-      standaloneEntries.push(entry);
-    }
-  }
-
-  const normalizedSets: NormalizedComponentSet[] = Object.entries(file.componentSets).map(([setNodeId, set]) => ({
-    nodeId: setNodeId,
-    name: set.name,
-    description: set.description,
-    variantNodes: (byComponentSetId.get(setNodeId) ?? []).map(([nodeId, c]) => ({ id: nodeId, name: c.name })),
-  }));
-  const standalone: NormalizedStandaloneComponent[] = standaloneEntries.map(([nodeId, c]) => ({
-    nodeId,
-    name: c.name,
-    description: c.description,
-  }));
-
-  const groups = buildComponentGroups(normalizedSets, standalone);
-  let componentsUpserted = 0;
-  for (let i = 0; i < groups.length; i++) {
-    await upsertComponent(workspaceId, groups[i]);
-    componentsUpserted++;
-    onProgress({ phase: "components", done: i + 1, total: groups.length });
-  }
+  const groups = groupComponentsFromFullFile(file);
+  const componentsUpserted = await upsertComponentGroups(workspaceId, groups, onProgress);
 
   return { tokensUpserted, tokensSkipped, componentsUpserted };
 }
@@ -857,4 +887,63 @@ export async function resyncTokensFromFigma(
   }
   const tokensSkipped = Object.keys(file.styles).length - resolvedStyles.size;
   return { tokensUpserted: resolvedStyles.size, tokensSkipped };
+}
+
+// ---- Targeted resync: components only ----
+
+export interface ComponentsResyncResult {
+  componentsUpserted: number;
+}
+
+/**
+ * Re-lists and upserts every component (fast path's component/component_set
+ * listing, or a full-file walk for components only as fallback) WITHOUT
+ * touching tokens/styles at all -- "Resync components" on the Settings
+ * page, symmetric with resyncTokensFromFigma above, for when only
+ * components changed (renamed, variants added/removed) and a full sync
+ * (which also re-lists every style) isn't needed. Shares
+ * fetchComponentGroupsFast/groupComponentsFromFullFile with the full sync
+ * so this can't resolve the same file's components differently.
+ *
+ * Metadata only, deliberately: unlike resyncTokens (which also cheaply
+ * regenerates the deterministic tokens.css on every call), this does NOT
+ * trigger code generation for anything -- regenerating a component's code
+ * is an LLM call, not something to fire automatically for every component
+ * on every metadata resync. Use "Generate code" or a component's own
+ * "Resync this component" for that.
+ */
+export async function resyncComponentsFromFigma(
+  workspaceId: string,
+  fileKey: string,
+  accessToken: string,
+  onProgress: OnSyncProgress = () => {},
+): Promise<ComponentsResyncResult> {
+  const key = encodeURIComponent(fileKey);
+  const [componentsRes, setsRes] = await Promise.all([
+    figmaGet<FigmaFileComponentsResponse>(`/files/${key}/components`, accessToken).catch(() => null),
+    figmaGet<FigmaFileComponentSetsResponse>(`/files/${key}/component_sets`, accessToken).catch(() => null),
+  ]);
+  const components = componentsRes?.meta.components ?? [];
+  const componentSets = setsRes?.meta.component_sets ?? [];
+
+  if (components.length === 0 && componentSets.length === 0) {
+    // Not a published library (or genuinely has zero components) --
+    // mirrors syncViaFullFileWalk's components phase, without touching tokens.
+    const file = await figmaGet<FigmaFileResponse>(`/files/${key}`, accessToken, FIGMA_FILE_FETCH_TIMEOUT_MS);
+    onProgress({
+      phase: "scope",
+      message: `This file isn't set up as a published Figma library, so this needed a full scan: ${Object.keys(file.componentSets).length} component set(s), ${Object.keys(file.components).length} component(s).`,
+    });
+    const groups = groupComponentsFromFullFile(file);
+    const componentsUpserted = await upsertComponentGroups(workspaceId, groups, onProgress);
+    return { componentsUpserted };
+  }
+
+  onProgress({
+    phase: "scope",
+    message: `Found ${componentSets.length} component set(s), ${components.length} component(s) (published library -- fast path).`,
+  });
+  const groups = await fetchComponentGroupsFast(fileKey, accessToken, components, componentSets);
+  const componentsUpserted = await upsertComponentGroups(workspaceId, groups, onProgress);
+  return { componentsUpserted };
 }

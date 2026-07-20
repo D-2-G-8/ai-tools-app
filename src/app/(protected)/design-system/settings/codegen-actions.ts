@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { commitFiles, openOrUpdatePullRequest, mergePullRequest } from "@/lib/github/client";
 import { getValidFigmaAccessToken } from "@/lib/figma/client";
-import { resyncTokensFromFigma } from "@/lib/figma/sync";
+import { resyncTokensFromFigma, resyncComponentsFromFigma } from "@/lib/figma/sync";
 import { generateTokensCss } from "@/lib/design-system-codegen/tokens";
 import { loadTokensForCss } from "@/lib/design-system-codegen/data";
 import { getOrOpenSessionBranch } from "@/lib/design-system-codegen/session";
@@ -116,6 +116,42 @@ export async function resyncTokens(): Promise<{ ok: boolean; error?: string; sum
     revalidatePath(SETTINGS_PATH);
     revalidatePath("/design-system");
     return { ok: true, summary, prUrl };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * "Resync components" (Settings page): re-lists and upserts every
+ * component WITHOUT touching tokens -- the symmetric counterpart to
+ * resyncTokens above, for when only components changed (renamed, variants
+ * added/removed in Figma) and a full sync (which also re-lists every
+ * token) isn't needed.
+ *
+ * Metadata only, deliberately: unlike resyncTokens, this does NOT
+ * regenerate/commit any code -- tokens.css is cheap and deterministic to
+ * regenerate on every token resync, but a component's code needs an LLM
+ * call, which isn't something to fire automatically for every component
+ * here. Use "Generate code" or a component's own "Resync this component"
+ * (design-system/components/[slug]) for that.
+ */
+export async function resyncComponents(): Promise<{ ok: boolean; error?: string; summary?: string }> {
+  const workspaceId = await getCurrentWorkspaceId();
+  const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
+  if (!ws) return { ok: false, error: "Workspace not found." };
+  if (!ws.figmaFileKey) return { ok: false, error: "Set a Figma file key above, then sync." };
+
+  const accessToken = await getValidFigmaAccessToken();
+  if (!accessToken) {
+    return { ok: false, error: "Figma isn't connected (or the connection expired) -- reconnect it above." };
+  }
+
+  try {
+    const result = await resyncComponentsFromFigma(workspaceId, ws.figmaFileKey, accessToken);
+    revalidatePath(SETTINGS_PATH);
+    revalidatePath("/design-system/components");
+    revalidatePath("/design-system/icons");
+    return { ok: true, summary: `Synced ${result.componentsUpserted} component(s).` };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
