@@ -8,6 +8,7 @@ import { getCurrentWorkspaceId } from "@/db/workspace";
 import { componentSourcePaths } from "@/lib/design-system-codegen/component";
 import { generateTokensCss } from "@/lib/design-system-codegen/tokens";
 import { getOrOpenSessionBranch } from "@/lib/design-system-codegen/session";
+import { reconcileCodeSyncWithRepo } from "@/lib/design-system-codegen/reconcile";
 import { commitFiles, type CommitFile } from "@/lib/github/client";
 import { finishCodeGenSession } from "./codegen-actions";
 
@@ -50,15 +51,47 @@ export interface ClearCodeSyncedResult {
   deleted?: number;
 }
 
+export interface ReconcileWithRepoResult {
+  ok: boolean;
+  reset?: number;
+  pendingCleared?: boolean;
+  error?: string;
+}
+
+/**
+ * Verifies the DB's code-sync claims against the actual design-system repo and
+ * fixes drift: components no longer present in the repo (e.g. their PR branch
+ * was deleted without merging) are reset to "never", and a dangling pending-PR
+ * pointer is cleared. Safe to run any time.
+ */
+export async function reconcileWithRepo(): Promise<ReconcileWithRepoResult> {
+  const workspaceId = await getCurrentWorkspaceId();
+  try {
+    const { reset, pendingCleared } = await reconcileCodeSyncWithRepo(workspaceId);
+    revalidatePath("/design-system/components");
+    revalidatePath(SETTINGS_PATH);
+    return { ok: true, reset, pendingCleared };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export async function clearCodeSyncedComponents(): Promise<ClearCodeSyncedResult> {
   const workspaceId = await getCurrentWorkspaceId();
-  const committed = await db
-    .select()
-    .from(designComponent)
-    .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.codeSyncStatus, "committed")));
-  if (committed.length === 0) return { ok: true, deleted: 0 };
 
   try {
+    // First make the DB honest about what's actually in the repo: a component
+    // only ever "committed" to a since-deleted PR branch isn't there to remove,
+    // so reconcile resets it -- and we then only try to delete files that
+    // genuinely exist (otherwise GitHub's tree API 422s on the missing paths).
+    await reconcileCodeSyncWithRepo(workspaceId);
+
+    const committed = await db
+      .select()
+      .from(designComponent)
+      .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.codeSyncStatus, "committed")));
+    if (committed.length === 0) return { ok: true, deleted: 0 };
+
     const branchName = await getOrOpenSessionBranch(workspaceId);
     const files: CommitFile[] = committed.flatMap((c) => {
       const paths = componentSourcePaths(c.slug, c.isIcon);

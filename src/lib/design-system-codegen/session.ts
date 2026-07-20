@@ -2,7 +2,7 @@ import "server-only";
 import { db } from "@/db";
 import { workspace } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { getOrCreateBranch } from "@/lib/github/client";
+import { getOrCreateBranch, branchExists } from "@/lib/github/client";
 
 /**
  * Returns the branch a code-sync commit should land on: reuses the
@@ -16,7 +16,22 @@ import { getOrCreateBranch } from "@/lib/github/client";
  */
 export async function getOrOpenSessionBranch(workspaceId: string): Promise<string> {
   const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
-  const branchName = ws?.designSystemPendingPrBranch || `figma-sync-${Date.now()}`;
+  let pending = ws?.designSystemPendingPrBranch || null;
+
+  // If the stored open-PR branch was deleted on GitHub, don't resurrect it
+  // (getOrCreateBranch would recreate it from base, resetting the "in progress"
+  // state and letting stale delete-commits target files that aren't there --
+  // the GitRPC 422 seen after a branch was deleted). Clear the pointer and mint
+  // a fresh branch instead. reconcile.ts separately fixes the component rows.
+  if (pending && !(await branchExists(pending))) {
+    await db
+      .update(workspace)
+      .set({ designSystemPendingPrBranch: null, designSystemPendingPrUrl: null })
+      .where(eq(workspace.id, workspaceId));
+    pending = null;
+  }
+
+  const branchName = pending || `figma-sync-${Date.now()}`;
   await getOrCreateBranch(branchName);
   return branchName;
 }

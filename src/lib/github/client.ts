@@ -173,6 +173,32 @@ export async function getOrCreateBranch(branchName: string): Promise<string> {
   return baseSha;
 }
 
+/** The design-system repo's base branch (what PRs target / what "in the repo" means). */
+export function getDesignSystemBaseBranch(): string {
+  return getConfig().baseBranch;
+}
+
+/** Whether a branch currently exists on the design-system repo. */
+export async function branchExists(branch: string): Promise<boolean> {
+  return (await getBranchSha(branch)) !== null;
+}
+
+/**
+ * Every file path present on a branch (recursive tree), or null if the branch
+ * doesn't exist. Used to reconcile the DB's "committed" claims against what's
+ * actually in the repo -- see reconcile.ts.
+ */
+export async function listBranchPaths(branch: string): Promise<Set<string> | null> {
+  const { owner, repo } = getConfig();
+  const sha = await getBranchSha(branch);
+  if (!sha) return null;
+  const commit = await githubFetch<RawCommit>(`/repos/${owner}/${repo}/git/commits/${sha}`);
+  const tree = await githubFetch<{ tree: { path: string; type: string }[] }>(
+    `/repos/${owner}/${repo}/git/trees/${commit.tree.sha}?recursive=1`,
+  );
+  return new Set(tree.tree.filter((t) => t.type === "blob").map((t) => t.path));
+}
+
 export interface CommitFile {
   path: string;
   /** null deletes this path from the tree (see commitFiles below). */

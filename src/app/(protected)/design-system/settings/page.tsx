@@ -6,7 +6,13 @@ import { getFigmaConnectionStatus } from "@/lib/session";
 import { SetupNotice } from "@/components/setup-notice";
 import { saveDesignSettings, disconnectFigma } from "./actions";
 import { confirmAndMergePendingPr } from "./codegen-actions";
-import { clearUnsyncedComponents, clearCodeSyncedComponents, clearUnsyncedTokens, clearCodeSyncedTokens } from "./cleanup-actions";
+import {
+  clearUnsyncedComponents,
+  clearCodeSyncedComponents,
+  clearUnsyncedTokens,
+  clearCodeSyncedTokens,
+  reconcileWithRepo,
+} from "./cleanup-actions";
 import { FigmaSyncButton } from "./figma-sync-button";
 import { DesignSystemCodegenPanel } from "./design-system-codegen-panel";
 import { ResyncTokensButton } from "./resync-tokens-button";
@@ -227,6 +233,20 @@ export default async function DesignSettingsPage({
           removed there, so those open/update a pull request instead of deleting anything immediately -- same
           review-before-merge as the rest of code sync above.
         </p>
+
+        <div className="mb-4 border-b border-neutral-100 pb-4">
+          <h3 className="mb-1 text-xs font-medium text-neutral-600">Repo state</h3>
+          <p className="mb-2 text-xs text-neutral-400">
+            &quot;Generated&quot; is tracked in the database. If a PR/branch was deleted in the design-system repo
+            without merging, those components aren&apos;t actually there anymore -- reconcile checks the real repo
+            and resets any that are gone (and clears a dangling pending PR), so the rest of code sync stays honest.
+          </p>
+          <ClearAllButton
+            action={reconcileWithRepo}
+            label="Reconcile with repo"
+            confirmText="Check the design-system repo and reset any components that aren't actually there (e.g. a deleted PR branch)? Safe -- only fixes DB drift."
+          />
+        </div>
 
         <div className="flex flex-col gap-4">
           <div>
