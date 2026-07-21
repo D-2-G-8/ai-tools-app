@@ -96,12 +96,27 @@ const contractSchema = z.object({
       z.object({
         name: z.string().describe("camelCase prop name, e.g. \"size\" or \"disabled\"."),
         type: z.string().describe('TypeScript type as a string, e.g. "\'sm\' | \'md\' | \'lg\'" or "boolean".'),
-        description: z.string().optional(),
+        description: z
+          .string()
+          .describe(
+            "REQUIRED, one clear sentence for a developer consuming this component: what the prop controls AND " +
+              "when to pass vs omit it. Be concrete about defaults and the controlled/uncontrolled split -- e.g. " +
+              "\"Controlled open state; pass together with onOpenChange to drive it from the parent, or omit both to " +
+              "let the component manage its own open/closed state.\" or \"Initial open state when uncontrolled; " +
+              "ignored if `open` is provided.\" Never leave this blank or generic ('the size prop').",
+          ),
       }),
     )
     .describe(
       "Props derived from this component's Figma variants/states. Group related variants into one " +
-        'enum-typed prop where sensible (e.g. "Size: Small"/"Size: Large" variants become one `size` prop).',
+        'enum-typed prop where sensible (e.g. "Size: Small"/"Size: Large" variants become one `size` prop). ' +
+        "For an INTERACTIVE toggle state (e.g. an Opened On/Off variant on an accordion, a Checked variant on a " +
+        "checkbox/switch, a Selected variant on a chip/tab), do NOT emit a single required boolean. Emit the " +
+        "standard controlled/uncontrolled hybrid TRIO so a parent UI can both drive it and observe changes: an " +
+        "OPTIONAL controlled value `open?: boolean` (natural name -- `checked`, `selected`...), an optional " +
+        "`defaultOpen?: boolean` initial value, and a callback `onOpenChange?: (open: boolean) => void` fired on " +
+        "every toggle. (The TSX keeps internal state seeded from the default and uses `open ?? internal` as the " +
+        "effective value.) Non-interactive display states (disabled, error, loading, size, variant) stay plain props.",
     ),
   cssVariables: z
     .array(z.string())
@@ -217,9 +232,19 @@ async function generateTsx(
       "",
       "Requirements:",
       `- Named export \`${componentName}\`, plus an exported \`${componentName}Props\` interface.`,
+      "- In the `" +
+        componentName +
+        "Props` interface, put a JSDoc `/** ... */` comment ABOVE EVERY prop, taken from that prop's description below -- say what it controls and when to pass vs omit it (and for a controlled/uncontrolled prop, which mode it's for). Storybook's docgen reads these JSDoc comments and shows them in the component's args/Controls table, so a developer consuming the component understands each prop without reading the source. Do not leave any prop undocumented.",
       "- If an \"Actual Figma design\" block is given above, reproduce its DOM structure and per-variant behavior faithfully (the same nesting of container/content/badge elements, the same size/type/state branching) -- don't invent a different structure.",
       "- EVERY prop above comes from a real Figma variant/state, so EVERY prop MUST visibly change what renders -- the way those variants actually differ in the design block. An enum prop (size/type/variant/position) branches the classes or markup; a boolean prop (opened/checked/selected/disabled/error/active/loading) applies the exact visual change its variants show: a rotation/flip, a different color/fill/border, a shown-vs-hidden element, a moved or reordered element, a swapped icon direction. A prop the component destructures but that never changes the output (beyond gating a child's presence) is a BUG -- consuming `opened` to render the body but leaving the chevron identical open vs closed is exactly this failure. If the design block shows how a variant differs, implement that difference; leave NO prop visually inert.",
-      "- Apply each such state-driven change in EXACTLY ONE place -- either a CSS class toggled here OR an inline style, NEVER both. Doing a transform in both an inline `style={{ transform: ... }}` AND a CSS rule compounds them (180deg + 180deg = 360deg) so the element visibly doesn't move at all. Prefer toggling a CSS class (e.g. `opened ? styles.opened : ''`) and let the stylesheet own the visual.",
+      "- Apply each such state-driven change through EXACTLY ONE mechanism -- never two that compound. Two ways this bites: (a) the SAME transform in both an inline `style={{ transform: ... }}` AND a CSS rule (180deg + 180deg = 360deg, so it visibly doesn't move); and (b) swapping to a DIFFERENT icon per state AND rotating it. If the design uses distinct glyphs per state and you compose them (e.g. `<ChevronDown/>` when closed, `<ChevronUp/>` when open), that icon ALREADY points the right way -- do NOT also add a CSS `rotate` to it, or the rotation fights the swap (an up-chevron rotated 180deg looks like a down-chevron again, exactly the bug it seems fixed but isn't). CHOOSE ONE: either swap the icon per state and add NO rotation, OR render a single fixed icon and rotate it via one CSS class. Prefer the icon swap when the design provides both glyphs as separate components.",
+      "- When a boolean state is INTERACTIVE (an accordion opening/closing, an expandable panel, a checkbox/switch/toggle, a selectable chip/tab), implement the STANDARD controlled/uncontrolled hybrid so the component both works on its own AND can be driven by a parent UI. Concretely, for a state called `open` (use the natural name -- `checked`, `selected`, `value`, etc.):",
+      "    * `open?: boolean` -- OPTIONAL controlled value. When the parent passes it, it WINS: render from it and do not use internal state for display.",
+      "    * `defaultOpen?: boolean` -- optional initial value for the uncontrolled case.",
+      "    * `onOpenChange?: (open: boolean) => void` -- called on EVERY user toggle with the NEXT value, so the parent always learns the new state (whether controlled or not).",
+      "    * internal `const [openState, setOpenState] = React.useState(defaultOpen ?? false)`; the effective value is `open ?? openState`.",
+      "    * on the click/change handler: compute `next = !effective`; if uncontrolled (`open === undefined`) call `setOpenState(next)`; ALWAYS call `onOpenChange?.(next)`.",
+      "  This means: with no props it still toggles on click (uncontrolled default -- never inert in Storybook or a first drop-in); a parent can fully control it via `open` + `onOpenChange`; and the parent always receives state changes. Drive the visual (rotate the chevron, show/hide the body, show the check) from the EFFECTIVE value. Do NOT make it controlled-only (a required value + required handler), and do NOT make it internal-only (no way for a parent to control or observe it). Apply this same hybrid to every interactive boolean.",
       "- Extend the appropriate native HTML element attributes type where sensible (e.g. ButtonHTMLAttributes for a button).",
       "- Reference styles ONLY via styles.<name>, copying each class name from the list above character-for-character (they are camelCase, so always dot access `styles.foo` -- never `styles['a-b']`, never a name not in the list). Never invent a class, never use inline styles for static styling, never hardcode a color/size value.",
       "- If a section only renders when a boolean prop is true (e.g. `{opened && <div className={styles.body}>...}`), a CSS open/close TRANSITION on that element is dead code (it mounts already-open). Either always render it and toggle an `open` class, or don't write a transition for it.",
@@ -291,7 +316,12 @@ async function generateStories(
       describeComponent(component),
       "",
       `Component: ${componentName}, imported from "./${fileBase}" (a barrel that re-exports it).`,
-      `Props:\n${contract.props.map((p) => `- ${p.name}: ${p.type}`).join("\n")}`,
+      `Props (name: type -- description):\n${contract.props.map((p) => `- ${p.name}: ${p.type}${p.description ? ` -- ${p.description}` : ""}`).join("\n")}`,
+      "In `meta`, include an `argTypes` map with an entry for EVERY prop above, each carrying a `description` " +
+        "(the prop's description text above -- what it controls and when to pass/omit it) so the Storybook Controls/Docs " +
+        "table documents every prop for the developer. For enum props also set `control: { type: \"select\" }` with the " +
+        "exact literal `options`, and for booleans `control: \"boolean\"`. Example: " +
+        '`argTypes: { open: { description: "Controlled open state; pass with onOpenChange to drive from the parent, or omit both for uncontrolled.", control: "boolean" } }`.',
       "",
       "Follow this exact structure (adjust component/args/stories to this component, but keep `title` and " +
         "the `Default` story EXACTLY as shown -- the platform deep-links to this specific story id):",
@@ -316,6 +346,10 @@ async function generateStories(
         "canonical story the component detail page embeds. Beyond that, add one story per meaningfully " +
         "distinct variant/state combination -- don't enumerate every possible cross-product if that would " +
         "be excessive, use judgment for what's useful to preview.",
+      "If the component is INTERACTIVE (toggles/expands/checks on click -- it manages its own state), the `Default` " +
+        "story must let that interaction happen: render it plainly and do NOT freeze it by hard-pinning the state prop " +
+        "with no way to change it. The reader must be able to click and watch it expand/collapse or toggle. Provide the " +
+        "content it needs to show something meaningful when open (e.g. a title and some body text/children).",
       "",
       "Import ONLY from \"./" +
         componentName +

@@ -311,11 +311,18 @@ export async function commitFiles(branchName: string, message: string, files: Co
       });
       return commit.sha;
     } catch (err) {
-      const isFastForwardRace = err instanceof Error && /not a fast forward/i.test(err.message);
-      if (!isFastForwardRace || attempt === MAX_COMMIT_ATTEMPTS) throw err;
-      // Someone else's commit landed on this branch between our read above
-      // and this ref update -- loop around, re-read the (now-moved) branch
-      // tip, and rebuild the tree/commit on top of it.
+      // Both messages mean the same thing: another commit updated this branch
+      // between our getBranchSha read above and this ref PATCH, so our parent
+      // is stale. GitHub returns EITHER "not a fast forward" OR a 422
+      // "Reference cannot be updated" for this race (the latter especially when
+      // several commits land near-simultaneously -- e.g. a dependency LEVEL of
+      // leaf icons all committing to the branch at once, which got far more
+      // likely once deterministic icon codegen made each commit near-instant).
+      // Either way: loop, re-read the moved tip, rebuild on top of it.
+      const isRefRace =
+        err instanceof Error &&
+        (/not a fast forward/i.test(err.message) || /reference cannot be updated/i.test(err.message));
+      if (!isRefRace || attempt === MAX_COMMIT_ATTEMPTS) throw err;
       await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + Math.floor(Math.random() * 250));
     }
   }
