@@ -5,7 +5,7 @@ import { getAnthropicClient } from "@/lib/llm/client";
 import { estimateCostUsd } from "@/lib/models";
 import type { DesignComponentVariant, DesignComponentState, StoredComponentContract } from "@/db/schema";
 import { toCssVarName, type TokenForCss } from "./tokens";
-import { parsePropType, type PropDomain, buildOwnProps, buildComposedProps } from "./review/prop-types";
+import { buildOwnProps, buildComposedProps } from "./review/prop-types";
 
 // Re-exported so existing `from ".../component"` import sites (and this
 // module's own generateComponentCodeReviewed below) can use these pure
