@@ -1,7 +1,7 @@
 import "server-only";
 import { runDeterministicGates, applyDeterministicFixes } from "./deterministic";
 import { reviewWithLlm } from "./reviewer";
-import type { Finding, FileKind, GeneratedFiles, ReviewContext, ReviewResult } from "./types";
+import type { Finding, GeneratedFiles, ReviewContext, ReviewResult } from "./types";
 
 export type { GeneratedFiles, ReviewContext, ReviewResult, Finding, FileKind } from "./types";
 
@@ -10,19 +10,15 @@ export interface ReviewAndFixArgs {
   files: GeneratedFiles;
   ctx: ReviewContext;
   spec: string | undefined;
-  regenerateFile: (kind: FileKind, feedback: string) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
+  /** Holistically fix the component to satisfy ALL current findings. May change
+   *  multiple files together (e.g. add a missing class to css AND keep the tsx
+   *  reference). Returns the updated file set + its token usage. */
+  applyFix: (files: GeneratedFiles, findings: Finding[]) => Promise<{ files: GeneratedFiles; inputTokens: number; outputTokens: number }>;
   maxIterations?: number;
 }
 
-function feedbackFor(file: FileKind, findings: Finding[]): string {
-  return findings
-    .filter((f) => f.file === file)
-    .map((f) => `- ${f.message}${f.suggestion ? ` (fix: ${f.suggestion})` : ""}`)
-    .join("\n");
-}
-
 export async function reviewAndFix(args: ReviewAndFixArgs): Promise<ReviewResult> {
-  const { model, ctx, spec, regenerateFile } = args;
+  const { model, ctx, spec } = args;
   const maxIterations = args.maxIterations ?? 3;
   let files = args.files;
   let findings: Finding[] = [];
@@ -45,21 +41,14 @@ export async function reviewAndFix(args: ReviewAndFixArgs): Promise<ReviewResult
       return { files, findings: [], passed: true, iterations: i, inputTokens, outputTokens };
     }
 
-    // 3) regenerate each affected file with its feedback (only files with
-    //    non-deterministically-fixed findings remaining)
-    const affected = new Set<FileKind>(findings.map((f) => f.file));
-    for (const kind of affected) {
-      if (kind === "index") continue; // index is deterministic; never LLM-regenerated
-      const fb = feedbackFor(kind, findings);
-      if (!fb) continue;
-      try {
-        const r = await regenerateFile(kind, fb);
-        files = { ...files, [kind]: r.content };
-        inputTokens += r.inputTokens;
-        outputTokens += r.outputTokens;
-      } catch {
-        // regeneration failed -> keep current file
-      }
+    // One holistic fix over ALL findings -- may change multiple files coherently.
+    try {
+      const fixed = await args.applyFix(files, findings);
+      files = fixed.files;
+      inputTokens += fixed.inputTokens;
+      outputTokens += fixed.outputTokens;
+    } catch {
+      // fix failed -> keep current files; the loop bound / terminal re-gate handles it
     }
   }
 

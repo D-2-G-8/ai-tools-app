@@ -20,7 +20,7 @@ import {
   type StoriesCheckResult,
 } from "./checks";
 import { reviewAndFix } from "./review";
-import type { Finding, FileKind, GeneratedFiles, ReviewContext } from "./review";
+import type { Finding, GeneratedFiles, ReviewContext } from "./review";
 
 // Re-exported so existing `from ".../component"` import sites keep working after
 // these pure helpers moved to ./paths (which has no server-only, so icon.ts and
@@ -418,6 +418,79 @@ async function generateStories(
   };
 }
 
+/** Delimiter-framed multi-file fix: one generateText that may rewrite any of the
+ *  three files together to satisfy all review findings. Delimited plain text
+ *  (not generateObject) -- large source files as JSON-string fields are
+ *  escaping/truncation-prone (see this module's top comment). */
+const FIX_DELIM = { tsx: "===== TSX =====", css: "===== SCSS =====", stories: "===== STORIES =====" };
+
+function parseFixedFiles(text: string, current: GeneratedFiles): GeneratedFiles {
+  const grab = (label: string, nextLabel: string | null): string | null => {
+    const start = text.indexOf(label);
+    if (start < 0) return null;
+    const from = start + label.length;
+    const end = nextLabel ? text.indexOf(nextLabel, from) : text.length;
+    const body = text.slice(from, end < 0 ? text.length : end);
+    const cleaned = stripCodeFence(body).trim();
+    return cleaned || null;
+  };
+  return {
+    tsx: grab(FIX_DELIM.tsx, FIX_DELIM.css) ?? current.tsx,
+    css: grab(FIX_DELIM.css, FIX_DELIM.stories) ?? current.css,
+    stories: grab(FIX_DELIM.stories, null) ?? current.stories,
+    index: current.index, // deterministic; never LLM-fixed
+  };
+}
+
+async function holisticFix(
+  model: string,
+  component: ComponentForCodegen,
+  contract: ComponentContract,
+  files: GeneratedFiles,
+  findings: { file: string; message: string; suggestion?: string }[],
+  componentName: string,
+): Promise<{ files: GeneratedFiles; inputTokens: number; outputTokens: number }> {
+  const anthropic = await getAnthropicClient();
+  const result = await generateText({
+    model: anthropic(model),
+    system:
+      "You fix a generated React + CSS-Modules design-system component so it satisfies ALL the review findings. " +
+      "You are a capable engineer: fix the ROOT cause, and when a fix spans files, change ALL the files it needs " +
+      "-- coherently. Change nothing that is already correct. Output ONLY the three delimited file blocks, no prose.",
+    prompt: [
+      describeComponent(component),
+      "",
+      `Component name: ${componentName}. CSS Modules class names (use these EXACT names, styles.<name>): ${contract.classNames.join(", ")}`,
+      `Props: ${contract.props.map((p) => `${p.name}: ${p.type}`).join("; ")}`,
+      "",
+      "Review findings you MUST fix ALL of:",
+      findings.map((f) => `- [${f.file}] ${f.message}${f.suggestion ? ` (suggested: ${f.suggestion})` : ""}`).join("\n"),
+      "",
+      "You MAY change more than one file to fix a single finding, coherently. Example: a class referenced in the " +
+        "tsx but missing from the scss -- either add the class to the scss OR remove the reference from the tsx, but " +
+        "make tsx and scss agree. Keep the component's exported name, prop API, and everything already correct.",
+      "",
+      "Current files:",
+      `--- current tsx ---\n${files.tsx}`,
+      `--- current scss ---\n${files.css}`,
+      `--- current stories ---\n${files.stories}`,
+      "",
+      "Now output the FULL updated content of all three files, each after its delimiter line exactly as shown, in this order, and nothing else:",
+      FIX_DELIM.tsx,
+      "<updated tsx>",
+      FIX_DELIM.css,
+      "<updated scss>",
+      FIX_DELIM.stories,
+      "<updated stories>",
+    ].join("\n"),
+  });
+  return {
+    files: parseFixedFiles(result.text, files),
+    inputTokens: result.usage?.inputTokens ?? 0,
+    outputTokens: result.usage?.outputTokens ?? 0,
+  };
+}
+
 /**
  * Generates one component's full file set. Throws (does not commit
  * anything itself -- that's the caller's job, see the codegen route) if
@@ -524,28 +597,15 @@ export async function generateComponentCodeReviewed(
     index: base.indexContent,
   };
 
-  const regenerateFile = async (kind: FileKind, feedback: string): Promise<{ content: string; inputTokens: number; outputTokens: number }> => {
-    if (kind === "tsx") {
-      const r = await generateTsx(model, component, contract, componentName, fileBase, feedback);
-      return { content: r.content, inputTokens: r.inputTokens, outputTokens: r.outputTokens };
-    }
-    if (kind === "css") {
-      const r = await generateCss(model, component, contract, availableTokens, feedback);
-      return { content: r.content, inputTokens: r.inputTokens, outputTokens: r.outputTokens };
-    }
-    if (kind === "stories") {
-      const r = await generateStories(model, component, contract, componentName, fileBase, feedback);
-      return { content: r.content, inputTokens: r.inputTokens, outputTokens: r.outputTokens };
-    }
-    return { content: files[kind], inputTokens: 0, outputTokens: 0 };
-  };
+  const applyFix = (f: GeneratedFiles, findings: Finding[]) =>
+    holisticFix(model, component, contract, f, findings, componentName);
 
   const review = await reviewAndFix({
     model,
     files,
     ctx,
     spec: component.designSpec,
-    regenerateFile,
+    applyFix,
   });
 
   const totalInput = base.inputTokens + review.inputTokens;
