@@ -69,15 +69,16 @@ export function buildComposedProps(
   for (const u of uses) {
     const c = childContracts.get(u.slug);
     if (!c) continue;
-    const pm = new Map<string, PropDomain>();
-    for (const p of c.props) pm.set(p.name, parsePropType(p.type));
-    out.set(u.componentName, pm);
+    out.set(u.componentName, buildOwnProps(c));
   }
   return out;
 }
 
 /** Extract the `<tag ...>` attribute substring for each occurrence, brace-aware
- *  so a `>` inside `{...}` doesn't truncate the tag. */
+ *  so a `>` inside `{...}` doesn't truncate the tag, and quote-aware so a `>`
+ *  (or any bracket) inside a quoted attribute value (e.g. `aria-label="Home >
+ *  Settings"`) is never mistaken for the tag's closing `>` or for
+ *  brace-depth-affecting punctuation. */
 function tagAttrChunks(source: string, tag: string): string[] {
   const chunks: string[] = [];
   const re = new RegExp(`<${tag}(?=[\\s/>])`, "g");
@@ -88,6 +89,10 @@ function tagAttrChunks(source: string, tag: string): string[] {
     let end = -1;
     for (; i < source.length; i++) {
       const c = source[i];
+      if (c === '"' || c === "'") {
+        i = scanQuotedRun(source, i) - 1;
+        continue;
+      }
       if (c === "{") depth++;
       else if (c === "}") depth = Math.max(0, depth - 1);
       else if (c === ">" && depth === 0) {
@@ -165,12 +170,12 @@ function maskBracesAndStrings(s: string): string {
 export function parseJsxLiteralProps(source: string, tag: string): ParsedProp[] {
   const out: ParsedProp[] = [];
   for (const attrs of tagAttrChunks(source, tag)) {
-    // name="v" | name='v'
-    for (const m of attrs.matchAll(/(?:^|\s)([A-Za-z_][\w]*)=(?:"([^"]*)"|'([^']*)')/g)) {
+    // name="v" | name='v' (attribute names may contain hyphens, e.g. aria-label)
+    for (const m of attrs.matchAll(/(?:^|\s)([A-Za-z_][\w-]*)=(?:"([^"]*)"|'([^']*)')/g)) {
       out.push({ name: m[1], value: { kind: "string", v: m[2] ?? m[3] ?? "" } });
     }
     // name={...}
-    for (const m of attrs.matchAll(/(?:^|\s)([A-Za-z_][\w]*)=\{([^{}]*)\}/g)) {
+    for (const m of attrs.matchAll(/(?:^|\s)([A-Za-z_][\w-]*)=\{([^{}]*)\}/g)) {
       const inner = m[2].trim();
       const q = inner.match(/^'([^']*)'$/) ?? inner.match(/^"([^"]*)"$/);
       if (q) out.push({ name: m[1], value: { kind: "string", v: q[1] } });
