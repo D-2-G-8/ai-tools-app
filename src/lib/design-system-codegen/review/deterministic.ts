@@ -1,4 +1,5 @@
 import { checkClassNamesMatch, checkStoriesNoNameCollision } from "../checks";
+import { parseJsxLiteralProps, parseStoriesArgs, type LiteralValue, type PropDomain, type ParsedProp } from "./prop-types";
 import type { Finding, GeneratedFiles, ReviewContext } from "./types";
 
 function escapeRegExp(s: string): string {
@@ -113,6 +114,71 @@ function gateTokenVars(files: GeneratedFiles, ctx: ReviewContext): Finding[] {
   return out;
 }
 
+/** Returns a human problem string if `value` violates `domain`, else null.
+ *  Only literal string/boolean values against finite domains are judged; expr
+ *  and open domains never produce a violation. */
+function domainViolation(value: LiteralValue, domain: PropDomain): string | null {
+  if (value.kind === "expr" || domain.kind === "open") return null;
+  if (domain.kind === "literals") {
+    if (value.kind === "boolean") return `boolean ${value.v} is not one of ${[...domain.values].map((v) => `"${v}"`).join(", ")}`;
+    if (!domain.values.has(value.v)) return `"${value.v}" is not one of ${[...domain.values].map((v) => `"${v}"`).join(", ")}`;
+    return null;
+  }
+  // domain.kind === "boolean"
+  if (value.kind === "string") return `"${value.v}" is a string but the prop is boolean`;
+  return null;
+}
+
+/** A7a: every literal value in the STORIES (args objects + <Component ...> JSX)
+ *  must be a member of the component's OWN prop domain. Catches e.g. a story
+ *  passing size="24 px" when the union is "24px"|"40px". */
+function gateSelfPropValues(files: GeneratedFiles, ctx: ReviewContext): Finding[] {
+  if (ctx.ownProps.size === 0) return [];
+  const out: Finding[] = [];
+  const props: ParsedProp[] = [
+    ...parseStoriesArgs(files.stories),
+    ...parseJsxLiteralProps(files.stories, ctx.componentName),
+  ];
+  for (const p of props) {
+    const domain = ctx.ownProps.get(p.name);
+    if (!domain) continue;
+    const v = domainViolation(p.value, domain);
+    if (v) {
+      out.push({
+        id: "self-prop-value",
+        severity: "build-breaking",
+        file: "stories",
+        message: `Stories set ${ctx.componentName}.${p.name} to a value that isn't in its type: ${v}. Use a valid value.`,
+      });
+    }
+  }
+  return out;
+}
+
+/** A7b: every literal value passed to a COMPOSED child in the tsx (<Child ...>)
+ *  must be a member of that child's prop domain (from its stored contract).
+ *  Catches e.g. <Badgecount appearance="Negative"> when the union is
+ *  "negative"|"positive". Children without a stored contract are skipped. */
+function gateComposedPropValues(files: GeneratedFiles, ctx: ReviewContext): Finding[] {
+  const out: Finding[] = [];
+  for (const [childId, domainMap] of ctx.composedProps) {
+    for (const p of parseJsxLiteralProps(files.tsx, childId)) {
+      const domain = domainMap.get(p.name);
+      if (!domain) continue;
+      const v = domainViolation(p.value, domain);
+      if (v) {
+        out.push({
+          id: "composed-prop-value",
+          severity: "build-breaking",
+          file: "tsx",
+          message: `<${childId}> is given ${p.name} that isn't in ${childId}'s type: ${v}. Convert the Figma label to a valid ${childId} prop value.`,
+        });
+      }
+    }
+  }
+  return out;
+}
+
 export function runDeterministicGates(files: GeneratedFiles, ctx: ReviewContext): Finding[] {
   const findings: Finding[] = [];
 
@@ -153,6 +219,9 @@ export function runDeterministicGates(files: GeneratedFiles, ctx: ReviewContext)
       message: storiesCheck.reason ?? "Stories name collision.",
     });
   }
+
+  findings.push(...gateSelfPropValues(files, ctx));
+  findings.push(...gateComposedPropValues(files, ctx));
 
   return findings;
 }

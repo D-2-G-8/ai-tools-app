@@ -2,6 +2,8 @@
 // component.ts -- so review/deterministic.ts stays importable under plain node
 // for fixture tests. Mirrors the 4 files a component generates.
 
+import type { PropDomain } from "./prop-types";
+
 export type FileKind = "tsx" | "css" | "stories" | "index";
 
 /** The four generated source contents, keyed by kind (the review layer's unit
@@ -35,6 +37,13 @@ export interface ReviewContext {
   /** Sanitized CSS var names (toCssVarName(token.name)) of every synced token,
    *  for verifying var(--x) references resolve. */
   tokenVarNames: Set<string>;
+  /** This component's own props -> value domain (from its contract). Empty ⇒
+   *  the self gate no-ops. */
+  ownProps: Map<string, PropDomain>;
+  /** Each COMPOSED child's props -> value domain, keyed by the child's JSX
+   *  identifier (componentName). Empty / missing child ⇒ composition gate skips
+   *  it (e.g. a child committed before contracts were persisted). */
+  composedProps: Map<string, Map<string, PropDomain>>;
 }
 
 export interface ReviewResult {

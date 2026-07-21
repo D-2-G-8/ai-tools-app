@@ -593,6 +593,9 @@ export async function generateComponentCodeReviewed(
     componentName,
     fileBase,
     tokenVarNames: new Set(availableTokens.map((t) => toCssVarName(t.name)).filter(Boolean)),
+    // populated in Task 4 (buildOwnProps / buildComposedProps); empty here = gates no-op
+    ownProps: new Map(),
+    composedProps: new Map(),
   };
 
   const files: GeneratedFiles = {
