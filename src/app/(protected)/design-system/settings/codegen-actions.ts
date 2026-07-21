@@ -12,6 +12,7 @@ import { generateTokensCss } from "@/lib/design-system-codegen/tokens";
 import { loadTokensForCss } from "@/lib/design-system-codegen/data";
 import { buildComponentIndex, buildDependencyEdges, dependencyClosure, topoLevels } from "@/lib/design-system-codegen/dependencies";
 import { getOrOpenSessionBranch } from "@/lib/design-system-codegen/session";
+import { getTypecheckAnnotations } from "@/lib/github/client";
 
 const SETTINGS_PATH = "/design-system/settings";
 
@@ -237,6 +238,39 @@ export async function resyncComponents(): Promise<{ ok: boolean; error?: string;
     return { ok: true, summary: `Synced ${result.componentsUpserted} component(s).` };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export interface CiTypecheckStatus {
+  conclusion: "success" | "failure" | "pending" | "missing" | "no-pr";
+  errorCount: number;
+  sample: string[];
+}
+
+/**
+ * Reads the design-system CI's latest typecheck result for the workspace's
+ * currently-open PR branch -- powers the typecheck status card in Settings
+ * and gates its "Auto-fix type errors" button. Deliberately reads
+ * designSystemPendingPrBranch DIRECTLY off the workspace row instead of
+ * calling getOrOpenSessionBranch: that helper OPENS a session branch (and,
+ * downstream, a PR) as a side effect when none exists yet -- a status read
+ * must never do that. No branch simply means "no-pr" here.
+ */
+export async function getCiTypecheckStatus(): Promise<CiTypecheckStatus> {
+  try {
+    const workspaceId = await getCurrentWorkspaceId();
+    const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
+    const branch = ws?.designSystemPendingPrBranch;
+    if (!branch) return { conclusion: "no-pr", errorCount: 0, sample: [] };
+
+    const tc = await getTypecheckAnnotations(branch);
+    return {
+      conclusion: tc.conclusion,
+      errorCount: tc.annotations.length,
+      sample: tc.annotations.slice(0, 8).map((a) => `${a.path.replace(/^src\//, "")}: ${a.message.slice(0, 120)}`),
+    };
+  } catch {
+    return { conclusion: "missing", errorCount: 0, sample: [] };
   }
 }
 
