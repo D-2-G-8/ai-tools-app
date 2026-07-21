@@ -630,18 +630,14 @@ export async function generateComponentCode(
     generateStories(model, component, contract, componentName, fileBase),
   ]);
 
-  const check = checkClassNamesMatch(tsx.content, css.content);
-  if (!check.ok) {
-    throw new Error(
-      `Generated ${componentName}: TSX references CSS Modules classes not defined in the stylesheet -- ` +
-        `${check.missingClasses.join(", ")}. Not committing a mismatched component.`,
-    );
-  }
-
-  const storiesCheck = checkStoriesNoNameCollision(stories.content, componentName);
-  if (!storiesCheck.ok) {
-    throw new Error(`Generated ${componentName}: ${storiesCheck.reason}`);
-  }
+  // NB: class-name (A3) and stories-collision (A4) mismatches are NOT thrown
+  // here anymore. generateComponentCode is only ever called by
+  // generateComponentCodeReviewed, whose review loop runs those exact
+  // deterministic gates and lets holisticFix repair them (add the missing scss
+  // class OR drop the tsx reference) -- a hard throw here aborted before the
+  // autofix could run (e.g. Inputtext referencing fieldError/fieldDefault). If
+  // the mismatch survives the loop, the reviewed path returns reviewPassed:false
+  // -> 422, so a mismatched component still never commits.
 
   const inputTokens = t1 + tsx.inputTokens + css.inputTokens + stories.inputTokens;
   const outputTokens = o1 + tsx.outputTokens + css.outputTokens + stories.outputTokens;
