@@ -137,7 +137,11 @@ function gateSelfPropValues(files: GeneratedFiles, ctx: ReviewContext): Finding[
   const out: Finding[] = [];
   const props: ParsedProp[] = [
     ...parseStoriesArgs(files.stories),
-    ...parseJsxLiteralProps(files.stories, ctx.componentName),
+    // Generated stories always render the component under its `Component`
+    // alias (`import { X as Component } from "./X"`, `<Component ...>`) --
+    // never under ctx.componentName -- so the JSX scan must look for the
+    // literal tag "Component", not the real component name.
+    ...parseJsxLiteralProps(files.stories, "Component"),
   ];
   for (const p of props) {
     const domain = ctx.ownProps.get(p.name);
