@@ -42,7 +42,7 @@ export async function reviewWithLlm(
   files: GeneratedFiles,
   spec: string | undefined,
   componentName: string,
-): Promise<Finding[]> {
+): Promise<{ findings: Finding[]; inputTokens: number; outputTokens: number }> {
   try {
     const anthropic = await getAnthropicClient();
     const result = await generateObject({
@@ -64,14 +64,18 @@ export async function reviewWithLlm(
         `--- ${componentName}.stories.tsx ---\n${files.stories}`,
       ].join("\n"),
     });
-    return result.object.findings.map((f) => ({
-      id: f.id,
-      severity: "quality" as const,
-      file: f.file as FileKind,
-      message: f.message,
-      suggestion: f.suggestion,
-    }));
+    return {
+      findings: result.object.findings.map((f) => ({
+        id: f.id,
+        severity: "quality" as const,
+        file: f.file as FileKind,
+        message: f.message,
+        suggestion: f.suggestion,
+      })),
+      inputTokens: result.usage?.inputTokens ?? 0,
+      outputTokens: result.usage?.outputTokens ?? 0,
+    };
   } catch {
-    return [];
+    return { findings: [], inputTokens: 0, outputTokens: 0 };
   }
 }

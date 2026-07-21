@@ -10,7 +10,7 @@ export interface ReviewAndFixArgs {
   files: GeneratedFiles;
   ctx: ReviewContext;
   spec: string | undefined;
-  regenerateFile: (kind: FileKind, feedback: string) => Promise<string>;
+  regenerateFile: (kind: FileKind, feedback: string) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
   maxIterations?: number;
 }
 
@@ -26,6 +26,8 @@ export async function reviewAndFix(args: ReviewAndFixArgs): Promise<ReviewResult
   const maxIterations = args.maxIterations ?? 3;
   let files = args.files;
   let findings: Finding[] = [];
+  let inputTokens = 0;
+  let outputTokens = 0;
 
   for (let i = 1; i <= maxIterations; i++) {
     // 1) deterministic gates + free fixes, then re-gate
@@ -35,10 +37,12 @@ export async function reviewAndFix(args: ReviewAndFixArgs): Promise<ReviewResult
 
     // 2) LLM DoD review (best-effort)
     const llm = await reviewWithLlm(model, files, spec, ctx.componentName);
-    findings = [...det, ...llm];
+    inputTokens += llm.inputTokens;
+    outputTokens += llm.outputTokens;
+    findings = [...det, ...llm.findings];
 
     if (findings.length === 0) {
-      return { files, findings: [], passed: true, iterations: i };
+      return { files, findings: [], passed: true, iterations: i, inputTokens, outputTokens };
     }
 
     // 3) regenerate each affected file with its feedback (only files with
@@ -49,10 +53,12 @@ export async function reviewAndFix(args: ReviewAndFixArgs): Promise<ReviewResult
       const fb = feedbackFor(kind, findings);
       if (!fb) continue;
       try {
-        const next = await regenerateFile(kind, fb);
-        files = { ...files, [kind]: next };
+        const r = await regenerateFile(kind, fb);
+        files = { ...files, [kind]: r.content };
+        inputTokens += r.inputTokens;
+        outputTokens += r.outputTokens;
       } catch {
-        // regeneration failed -> keep current file; loop/terminal handles it
+        // regeneration failed -> keep current file
       }
     }
   }
@@ -63,5 +69,5 @@ export async function reviewAndFix(args: ReviewAndFixArgs): Promise<ReviewResult
   files = finalFixed;
   const residual = runDeterministicGates(files, ctx);
   const passed = !residual.some((f) => f.severity === "build-breaking");
-  return { files, findings: [...residual, ...findings.filter((f) => f.severity === "quality")], passed, iterations: maxIterations };
+  return { files, findings: [...residual, ...findings.filter((f) => f.severity === "quality")], passed, iterations: maxIterations, inputTokens, outputTokens };
 }

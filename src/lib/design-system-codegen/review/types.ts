@@ -44,4 +44,7 @@ export interface ReviewResult {
   /** True iff no build-breaking finding remains (safe to commit). */
   passed: boolean;
   iterations: number;
+  /** Accumulated token usage of the review phase (LLM reviews + regenerations). */
+  inputTokens: number;
+  outputTokens: number;
 }

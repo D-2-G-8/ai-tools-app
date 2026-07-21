@@ -156,6 +156,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
         // broken build. Mark failed and surface the findings.
         await db.update(designComponent).set({ codeSyncStatus: "failed" }).where(eq(designComponent.id, component.id));
         const summary = reviewed.reviewFindings.map((f) => `[${f.severity}] ${f.file}: ${f.message}`).join("; ");
+        await db.insert(runTable).values({
+          workspaceId,
+          toolKey: "design-system-codegen",
+          model,
+          userId: currentUser.id,
+          status: "error",
+          inputSummary: `Generate ${component.name}`.slice(0, 500),
+          errorMessage: `Review did not pass after autofix: ${summary}`.slice(0, 2000),
+          inputTokens: reviewed.inputTokens,
+          outputTokens: reviewed.outputTokens,
+          costEstimateUsd: reviewed.costUsd.toFixed(6),
+        });
         return NextResponse.json(
           { ok: false, error: `Review did not pass after autofix: ${summary}`.slice(0, 2000) },
           { status: 422 },

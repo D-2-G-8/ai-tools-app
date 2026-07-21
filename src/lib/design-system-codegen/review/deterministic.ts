@@ -54,8 +54,10 @@ function gateUnusedReactImport(content: string, file: "tsx" | "stories"): Findin
  *  depend on it). Not auto-fixable (rename touches every reference) -> handed
  *  to the LLM autofix. */
 function gateExportName(files: GeneratedFiles, ctx: ReviewContext): Finding | null {
-  const re = new RegExp(`export\\s+(?:const|function)\\s+${escapeRegExp(ctx.componentName)}\\b`);
-  if (re.test(files.tsx)) return null;
+  const n = escapeRegExp(ctx.componentName);
+  const direct = new RegExp(`export\\s+(?:const|function)\\s+${n}\\b`);
+  const named = new RegExp(`export\\s*\\{[^}]*\\b${n}\\b[^}]*\\}`);
+  if (direct.test(files.tsx) || named.test(files.tsx)) return null;
   return {
     id: "export-name-mismatch",
     severity: "build-breaking",
@@ -64,21 +66,28 @@ function gateExportName(files: GeneratedFiles, ctx: ReviewContext): Finding | nu
   };
 }
 
-/** A6: every var(--x) the scss references must be a synced token, else it
- *  resolves to nothing at runtime. Not auto-fixable (need the right token) ->
- *  LLM autofix. */
+/** A6: every var(--x) the scss references must resolve -- either a synced token
+ *  OR a custom property the same stylesheet defines locally (`--x: ...`). Also
+ *  tolerates a var() fallback (`var(--x, 8px)`). Unresolved ones are
+ *  build-breaking (they render as nothing). */
 function gateTokenVars(files: GeneratedFiles, ctx: ReviewContext): Finding[] {
+  // Custom properties DEFINED in this stylesheet (`--x:`), which are local and
+  // always resolve regardless of the token set.
+  const localDefs = new Set<string>();
+  for (const m of files.css.matchAll(/(?:^|[^-\w])--([a-z0-9-]+)\s*:/gi)) {
+    localDefs.add(m[1].toLowerCase());
+  }
   const out: Finding[] = [];
   const seen = new Set<string>();
-  for (const m of files.css.matchAll(/var\(\s*--([a-z0-9-]+)\s*\)/gi)) {
+  for (const m of files.css.matchAll(/var\(\s*--([a-z0-9-]+)\s*(?:,[^)]*)?\)/gi)) {
     const name = m[1].toLowerCase();
-    if (seen.has(name) || ctx.tokenVarNames.has(name)) continue;
+    if (seen.has(name) || ctx.tokenVarNames.has(name) || localDefs.has(name)) continue;
     seen.add(name);
     out.push({
       id: "unknown-token-var",
       severity: "build-breaking",
       file: "css",
-      message: `var(--${name}) is not a synced design token. Use an existing token var, or an inline value from the design spec.`,
+      message: `var(--${name}) is neither a synced design token nor a custom property defined in this stylesheet. Use an existing token var, define it locally, or use an inline value.`,
     });
   }
   return out;
