@@ -467,6 +467,35 @@ function parseFixedFiles(text: string, current: GeneratedFiles): GeneratedFiles 
   };
 }
 
+/** Human-readable list of each composed child's REAL prop API (from its stored
+ *  contract), with the crucial note that the Figma spec writes instance props as
+ *  raw variant LABELS (e.g. `Appearance=Negative`, `Size=24 px`) which MUST be
+ *  mapped to these values, NOT copied verbatim. Empty string if nothing is
+ *  composed or no child contracts are available. Shared by the generation autofix
+ *  AND the LLM review -- so the reviewer stops grading correct (mapped)
+ *  composition values (appearance="negative", size="24px") as design infidelity
+ *  and pulling the autofix back toward the raw labels the deterministic gate
+ *  rejects. */
+export function composedApiDescription(
+  component: ComponentForCodegen,
+  childContracts?: Map<string, ChildContract>,
+): string {
+  if (!component.uses || component.uses.length === 0 || !childContracts) return "";
+  const lines = component.uses
+    .map((u) => {
+      const c = childContracts.get(u.slug);
+      return c ? `- ${u.componentName}: ${c.props.map((p) => `${p.name}: ${p.type}`).join("; ")}` : "";
+    })
+    .filter(Boolean);
+  if (lines.length === 0) return "";
+  return (
+    "Composed children accept ONLY these prop values. The Figma spec writes their instance props as raw " +
+    'variant LABELS (e.g. `Appearance=Negative`, `Size=24 px`); those MAP to the child\'s real values below -- ' +
+    'the code MUST use the real values (e.g. appearance="negative", size="24px"), NOT the raw labels:\n' +
+    lines.join("\n")
+  );
+}
+
 async function holisticFix(
   model: string,
   component: ComponentForCodegen,
@@ -488,15 +517,7 @@ async function holisticFix(
       "",
       `Component name: ${componentName}. CSS Modules class names (use these EXACT names, styles.<name>): ${contract.classNames.join(", ")}`,
       `Props: ${contract.props.map((p) => `${p.name}: ${p.type}`).join("; ")}`,
-      component.uses && component.uses.length
-        ? `Composed children's prop APIs (pass ONLY these exact values -- match case/units):\n${component.uses
-            .map((u) => {
-              const c = childContracts?.get(u.slug);
-              return c ? `- ${u.componentName}: ${c.props.map((p) => `${p.name}: ${p.type}`).join("; ")}` : "";
-            })
-            .filter(Boolean)
-            .join("\n")}`
-        : "",
+      composedApiDescription(component, childContracts),
       component.uses && component.uses.length
         ? `Composed components must be imported with EXACTLY these statements (copy verbatim -- correct path AND name; do NOT rename or shorten):\n${[
             ...buildExpectedComposedImports(component.uses, component.isIcon),
@@ -652,6 +673,7 @@ export async function generateComponentCodeReviewed(
     files,
     ctx,
     spec: component.designSpec,
+    composedApi: composedApiDescription(component, childContracts),
     applyFix,
   });
 

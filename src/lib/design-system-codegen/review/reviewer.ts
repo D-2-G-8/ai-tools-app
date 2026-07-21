@@ -42,6 +42,7 @@ export async function reviewWithLlm(
   files: GeneratedFiles,
   spec: string | undefined,
   componentName: string,
+  composedApi?: string,
 ): Promise<{ findings: Finding[]; inputTokens: number; outputTokens: number }> {
   try {
     const anthropic = await getAnthropicClient();
@@ -54,6 +55,19 @@ export async function reviewWithLlm(
       prompt: [
         `Component: ${componentName}`,
         spec ? `Figma design spec (the reference):\n${spec}` : "No Figma spec available -- grade behavior/API only.",
+        // Composed children's REAL contract values (when this component composes
+        // others). Without this the reviewer reads the spec's raw Figma variant
+        // LABELS (Appearance=Negative, Size=24 px) as the target and wrongly
+        // flags the correct mapped code (appearance="negative", size="24px") as
+        // infidelity -- fighting the deterministic composition-value gate so the
+        // autofix can't converge. This section + the checklist clause below stop
+        // that.
+        composedApi
+          ? `\n${composedApi}\nWhen grading composed-child instance props, the CORRECT value is the child's real ` +
+            "contract value above (lowercase, units per the child's type), NOT the raw Figma label. Do NOT flag " +
+            'a mapped value (e.g. appearance="negative" for Figma Appearance=Negative, size="24px" for Size=24 px) ' +
+            "as a fidelity violation -- that mapping is required and correct."
+          : "",
         "",
         "Checklist:",
         DOD_RUBRIC,

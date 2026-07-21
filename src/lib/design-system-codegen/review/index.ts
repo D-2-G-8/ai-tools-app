@@ -10,6 +10,11 @@ export interface ReviewAndFixArgs {
   files: GeneratedFiles;
   ctx: ReviewContext;
   spec: string | undefined;
+  /** Pre-formatted description of the composed children's REAL prop contracts
+   *  (see composedApiDescription). Lets the LLM review grade composition prop
+   *  VALUES against the child's actual API instead of the raw Figma labels, so
+   *  it stops contradicting the deterministic composition-value gate. */
+  composedApi?: string;
   /** Holistically fix the component to satisfy ALL current findings. May change
    *  multiple files together (e.g. add a missing class to css AND keep the tsx
    *  reference). Returns the updated file set + its token usage. */
@@ -18,7 +23,7 @@ export interface ReviewAndFixArgs {
 }
 
 export async function reviewAndFix(args: ReviewAndFixArgs): Promise<ReviewResult> {
-  const { model, ctx, spec } = args;
+  const { model, ctx, spec, composedApi } = args;
   const maxIterations = args.maxIterations ?? 3;
   let files = args.files;
   let findings: Finding[] = [];
@@ -32,7 +37,7 @@ export async function reviewAndFix(args: ReviewAndFixArgs): Promise<ReviewResult
     det = runDeterministicGates(files, ctx);
 
     // 2) LLM DoD review (best-effort)
-    const llm = await reviewWithLlm(model, files, spec, ctx.componentName);
+    const llm = await reviewWithLlm(model, files, spec, ctx.componentName, composedApi);
     inputTokens += llm.inputTokens;
     outputTokens += llm.outputTokens;
     findings = [...det, ...llm.findings];
