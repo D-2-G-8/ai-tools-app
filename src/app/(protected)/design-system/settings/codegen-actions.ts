@@ -98,23 +98,34 @@ export async function computeCodegenPlan(
  */
 export async function computeClosurePlan(
   rootSlug: string,
-): Promise<{ levels: string[][]; edges: Record<string, string[]>; error?: string }> {
+): Promise<{ levels: string[][]; edges: Record<string, string[]>; committed: string[]; error?: string }> {
   try {
     const workspaceId = await getCurrentWorkspaceId();
     const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
     const token = await getValidFigmaAccessToken();
-    if (!ws?.figmaFileKey || !token) return { levels: [[rootSlug]], edges: {} };
+    if (!ws?.figmaFileKey || !token) return { levels: [[rootSlug]], edges: {}, committed: [] };
 
     const all = await db
-      .select({ slug: designComponent.slug, figmaNodeIds: designComponent.figmaNodeIds, isIcon: designComponent.isIcon })
+      .select({
+        slug: designComponent.slug,
+        figmaNodeIds: designComponent.figmaNodeIds,
+        isIcon: designComponent.isIcon,
+        codeSyncStatus: designComponent.codeSyncStatus,
+      })
       .from(designComponent)
       .where(eq(designComponent.workspaceId, workspaceId));
 
     const index = buildComponentIndex(all);
     const { slugs, edges } = await dependencyClosure(rootSlug, all, ws.figmaFileKey, token, index);
-    return { levels: topoLevels(slugs, edges), edges: Object.fromEntries(edges) };
+    // Closure members already committed to the repo -- the panel skips these so
+    // regenerating a component doesn't rebuild its already-built dependencies.
+    const inClosure = new Set(slugs);
+    const committed = all
+      .filter((c) => inClosure.has(c.slug) && c.codeSyncStatus === "committed")
+      .map((c) => c.slug);
+    return { levels: topoLevels(slugs, edges), edges: Object.fromEntries(edges), committed };
   } catch (err) {
-    return { levels: [[rootSlug]], edges: {}, error: describeFigmaError(err) };
+    return { levels: [[rootSlug]], edges: {}, committed: [], error: describeFigmaError(err) };
   }
 }
 
