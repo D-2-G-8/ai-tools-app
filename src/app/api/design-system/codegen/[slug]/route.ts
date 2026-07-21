@@ -6,7 +6,7 @@ import { db } from "@/db";
 import { workspace, designComponent, run as runTable } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getEffectiveModel } from "@/lib/tools/model-settings";
-import { generateComponentCodeReviewed, type ComponentForCodegen } from "@/lib/design-system-codegen/component";
+import { generateComponentCodeReviewed, type ComponentForCodegen, type ChildContract } from "@/lib/design-system-codegen/component";
 import type { Finding } from "@/lib/design-system-codegen/review";
 import type { GeneratedComponentFiles } from "@/lib/design-system-codegen/paths";
 import { buildIconComponentFiles } from "@/lib/design-system-codegen/icon";
@@ -73,6 +73,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   // used, if it got that far -- block-scoped consts from inside try aren't
   // visible in catch.
   let model: string | undefined;
+  let generatedContract: ChildContract | null = null;
 
   try {
     model = await getEffectiveModel(workspaceId, "design-system-codegen");
@@ -110,6 +111,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       // fetch fails, we fall back to label-only generation rather than failing.
       let designSpec: string | undefined;
       let uses: { slug: string; componentName: string; isIcon: boolean }[] | undefined;
+      let childContracts = new Map<string, ChildContract>();
       if (ws.figmaFileKey && component.figmaNodeIds.length > 0 && figmaToken) {
         try {
           // Only committed components are composable -- their code exists to
@@ -117,10 +119,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
           // full run the orchestrator generates in dependency order so a
           // component's dependencies are committed by the time it runs.
           const committed = await db
-            .select({ slug: designComponent.slug, figmaNodeIds: designComponent.figmaNodeIds, isIcon: designComponent.isIcon })
+            .select({
+              slug: designComponent.slug,
+              figmaNodeIds: designComponent.figmaNodeIds,
+              isIcon: designComponent.isIcon,
+              contractJson: designComponent.contractJson,
+            })
             .from(designComponent)
             .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.codeSyncStatus, "committed")));
           const index = buildComponentIndex(committed);
+          for (const c of committed) {
+            if (c.contractJson) childContracts.set(c.slug, c.contractJson);
+          }
           const design = await fetchComponentDesignSpec(
             ws.figmaFileKey,
             component.figmaNodeIds,
@@ -148,9 +158,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
         designSpec,
         uses,
       };
-      const reviewed = await generateComponentCodeReviewed(model, forCodegen, tokens);
+      const reviewed = await generateComponentCodeReviewed(model, forCodegen, tokens, childContracts);
       generated = reviewed;
       reviewFindings = reviewed.reviewFindings;
+      generatedContract = reviewed.contract;
       if (!reviewed.reviewPassed) {
         // A build-breaking finding survived the autofix loop -- do NOT commit a
         // broken build. Mark failed and surface the findings.
@@ -194,7 +205,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
 
     await db
       .update(designComponent)
-      .set({ codeSyncStatus: "committed", lastCodeSyncAt: new Date(), lastCodeCommitSha: sha })
+      .set({
+        codeSyncStatus: "committed",
+        lastCodeSyncAt: new Date(),
+        lastCodeCommitSha: sha,
+        ...(generatedContract ? { contractJson: generatedContract } : {}),
+      })
       .where(eq(designComponent.id, component.id));
 
     // Same run/toolKey accounting every other tool gets (see
