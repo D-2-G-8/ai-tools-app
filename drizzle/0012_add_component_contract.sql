@@ -1,0 +1,1 @@
+ALTER TABLE "design_component" ADD COLUMN "contract_json" jsonb;
