@@ -22,6 +22,7 @@ export interface CiAutofixResult {
   skippedIcons: string[];
   remaining: number;
   errorCount: number;
+  failed: string[];
 }
 
 /**
@@ -45,18 +46,19 @@ export interface CiAutofixResult {
 export async function autofixTypeErrorsFromCi(workspaceId: string, userId: string): Promise<CiAutofixResult> {
   const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
   const branch = ws?.designSystemPendingPrBranch || null;
-  if (!branch) return { status: "no-pr", fixed: [], skippedIcons: [], remaining: 0, errorCount: 0 };
+  if (!branch) return { status: "no-pr", fixed: [], skippedIcons: [], remaining: 0, errorCount: 0, failed: [] };
 
   const tc = await getTypecheckAnnotations(branch);
-  if (tc.conclusion === "pending") return { status: "pending", fixed: [], skippedIcons: [], remaining: 0, errorCount: 0 };
+  if (tc.conclusion === "pending")
+    return { status: "pending", fixed: [], skippedIcons: [], remaining: 0, errorCount: 0, failed: [] };
   if (tc.conclusion === "success" || tc.conclusion === "missing") {
     await db.update(workspace).set({ ciAutofixAttempts: 0 }).where(eq(workspace.id, workspaceId));
-    return { status: "green", fixed: [], skippedIcons: [], remaining: 0, errorCount: 0 };
+    return { status: "green", fixed: [], skippedIcons: [], remaining: 0, errorCount: 0, failed: [] };
   }
 
   // failure
   if ((ws?.ciAutofixAttempts ?? 0) >= ESCALATE_AFTER) {
-    return { status: "escalate", fixed: [], skippedIcons: [], remaining: 0, errorCount: tc.annotations.length };
+    return { status: "escalate", fixed: [], skippedIcons: [], remaining: 0, errorCount: tc.annotations.length, failed: [] };
   }
 
   const groups = groupAnnotationsByComponent(tc.annotations);
@@ -65,6 +67,7 @@ export async function autofixTypeErrorsFromCi(workspaceId: string, userId: strin
 
   const model = await getEffectiveModel(workspaceId, "design-system-codegen");
   const fixed: string[] = [];
+  const failed: string[] = [];
 
   // Committed components -> contracts, for children lookup (a fixed
   // component may compose other design-system components; the fixer needs
@@ -84,80 +87,88 @@ export async function autofixTypeErrorsFromCi(workspaceId: string, userId: strin
   const bySlug = new Map(committed.map((c) => [c.slug, c]));
 
   for (const g of fixable) {
-    const row = bySlug.get(g.slug);
-    if (!row || !row.contractJson) continue; // no persisted contract -> can't fix safely; leave for regen
+    try {
+      const row = bySlug.get(g.slug);
+      if (!row || !row.contractJson) continue; // no persisted contract -> can't fix safely; leave for regen
 
-    const paths = componentSourcePaths(g.slug, g.isIcon);
-    const [tsx, css, stories] = await Promise.all([
-      getBranchFile(branch, paths.tsxPath),
-      getBranchFile(branch, paths.cssPath),
-      getBranchFile(branch, paths.storiesPath),
-    ]);
-    if (tsx == null) continue;
+      const paths = componentSourcePaths(g.slug, g.isIcon);
+      const [tsx, css, stories] = await Promise.all([
+        getBranchFile(branch, paths.tsxPath),
+        getBranchFile(branch, paths.cssPath),
+        getBranchFile(branch, paths.storiesPath),
+      ]);
+      if (tsx == null) continue;
 
-    // Children this component composes come from its OWN tsx imports (no
-    // Figma refetch -- CI annotations carry no design-spec context).
-    const childSlugs = parseCompositionImports(tsx)
-      .map((i) => importSlug(i.path))
-      .filter((s): s is string => !!s);
-    const uses = [...new Set(childSlugs)]
-      .map((slug) => bySlug.get(slug))
-      .filter((c): c is NonNullable<typeof c> => !!c)
-      .map((c) => ({ slug: c.slug, componentName: componentSourcePaths(c.slug, c.isIcon).componentName, isIcon: c.isIcon }));
-    const childContracts = new Map<string, ChildContract>();
-    for (const u of uses) {
-      const c = bySlug.get(u.slug);
-      if (c?.contractJson) childContracts.set(u.slug, c.contractJson);
+      // Children this component composes come from its OWN tsx imports (no
+      // Figma refetch -- CI annotations carry no design-spec context).
+      const childSlugs = parseCompositionImports(tsx)
+        .map((i) => importSlug(i.path))
+        .filter((s): s is string => !!s);
+      const uses = [...new Set(childSlugs)]
+        .map((slug) => bySlug.get(slug))
+        .filter((c): c is NonNullable<typeof c> => !!c)
+        .map((c) => ({ slug: c.slug, componentName: componentSourcePaths(c.slug, c.isIcon).componentName, isIcon: c.isIcon }));
+      const childContracts = new Map<string, ChildContract>();
+      for (const u of uses) {
+        const c = bySlug.get(u.slug);
+        if (c?.contractJson) childContracts.set(u.slug, c.contractJson);
+      }
+
+      const component: ComponentForCodegen = {
+        slug: row.slug,
+        name: row.name,
+        description: row.description ?? undefined,
+        variants: row.variants,
+        states: row.states,
+        isIcon: row.isIcon,
+        designSpec: undefined,
+        uses,
+      };
+      const contract: ComponentContract = {
+        // StoredComponentContract's props.description is optional (older rows
+        // predate it); the fixer's contract schema requires it, so default to
+        // an empty string rather than dropping the prop.
+        props: row.contractJson.props.map((p) => ({ name: p.name, type: p.type, description: p.description ?? "" })),
+        cssVariables: row.contractJson.cssVariables ?? [],
+        classNames: row.contractJson.classNames ?? [],
+      };
+
+      const result = await fixComponentFiles(
+        model,
+        component,
+        contract,
+        { tsx, css: css ?? "", stories: stories ?? "", index: "" },
+        g.findings,
+        childContracts,
+      );
+
+      await commitFiles(branch, `Fix type errors in ${paths.componentName} (CI)`, [
+        { path: paths.tsxPath, content: result.files.tsx },
+        { path: paths.cssPath, content: result.files.css },
+        { path: paths.storiesPath, content: result.files.stories },
+      ]);
+      // costEstimateUsd is omitted -- it has a DB default ("0") and this run
+      // (a targeted CI fix, not a full generation) doesn't compute a cost the
+      // way generateComponentCode's estimateCostUsd call does.
+      await db.insert(runTable).values({
+        workspaceId,
+        toolKey: "design-system-codegen",
+        model,
+        userId,
+        status: "completed",
+        inputSummary: `CI type-fix ${row.name}`.slice(0, 500),
+        outputSummary: `Fixed ${g.findings.length} tsc error(s)`.slice(0, 500),
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+      });
+      fixed.push(g.slug);
+    } catch (err) {
+      // One flaky component (LLM timeout, commit 422, ...) must not throw out
+      // of the whole batch -- the rest of `fixable` still deserves a shot, and
+      // the end-of-loop attempts bump below must still run.
+      console.warn(`[ci-autofix] failed to fix ${g.slug}:`, err);
+      failed.push(g.slug);
     }
-
-    const component: ComponentForCodegen = {
-      slug: row.slug,
-      name: row.name,
-      description: row.description ?? undefined,
-      variants: row.variants,
-      states: row.states,
-      isIcon: row.isIcon,
-      designSpec: undefined,
-      uses,
-    };
-    const contract: ComponentContract = {
-      // StoredComponentContract's props.description is optional (older rows
-      // predate it); the fixer's contract schema requires it, so default to
-      // an empty string rather than dropping the prop.
-      props: row.contractJson.props.map((p) => ({ name: p.name, type: p.type, description: p.description ?? "" })),
-      cssVariables: row.contractJson.cssVariables ?? [],
-      classNames: row.contractJson.classNames ?? [],
-    };
-
-    const result = await fixComponentFiles(
-      model,
-      component,
-      contract,
-      { tsx, css: css ?? "", stories: stories ?? "", index: "" },
-      g.findings,
-      childContracts,
-    );
-
-    await commitFiles(branch, `Fix type errors in ${paths.componentName} (CI)`, [
-      { path: paths.tsxPath, content: result.files.tsx },
-      { path: paths.cssPath, content: result.files.css },
-      { path: paths.storiesPath, content: result.files.stories },
-    ]);
-    // costEstimateUsd is omitted -- it has a DB default ("0") and this run
-    // (a targeted CI fix, not a full generation) doesn't compute a cost the
-    // way generateComponentCode's estimateCostUsd call does.
-    await db.insert(runTable).values({
-      workspaceId,
-      toolKey: "design-system-codegen",
-      model,
-      userId,
-      status: "completed",
-      inputSummary: `CI type-fix ${row.name}`.slice(0, 500),
-      outputSummary: `Fixed ${g.findings.length} tsc error(s)`.slice(0, 500),
-      inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens,
-    });
-    fixed.push(g.slug);
   }
 
   await db
@@ -171,5 +182,6 @@ export async function autofixTypeErrorsFromCi(workspaceId: string, userId: strin
     skippedIcons: iconGroups.map((g) => g.slug),
     remaining: Math.max(0, groups.filter((g) => !g.isIcon).length - fixed.length),
     errorCount: tc.annotations.length,
+    failed,
   };
 }

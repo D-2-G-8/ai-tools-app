@@ -26,7 +26,7 @@ export async function reconcilePendingPr(workspaceId: string): Promise<{ cleared
 
   await db
     .update(workspace)
-    .set({ designSystemPendingPrUrl: null, designSystemPendingPrBranch: null })
+    .set({ designSystemPendingPrUrl: null, designSystemPendingPrBranch: null, ciAutofixAttempts: 0 })
     .where(eq(workspace.id, workspaceId));
   return { cleared: true };
 }
@@ -68,7 +68,7 @@ export async function reconcileCodeSyncWithRepo(workspaceId: string): Promise<Re
       // reached base, so anything "committed" only on it isn't in the repo.
       await db
         .update(workspace)
-        .set({ designSystemPendingPrBranch: null, designSystemPendingPrUrl: null })
+        .set({ designSystemPendingPrBranch: null, designSystemPendingPrUrl: null, ciAutofixAttempts: 0 })
         .where(eq(workspace.id, workspaceId));
       pendingCleared = true;
     }

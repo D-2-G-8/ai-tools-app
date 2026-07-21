@@ -159,7 +159,7 @@ export async function finishCodeGenSession(branchName: string): Promise<{ prUrl:
 
   await db
     .update(workspace)
-    .set({ designSystemPendingPrUrl: pr.htmlUrl, designSystemPendingPrBranch: branchName })
+    .set({ designSystemPendingPrUrl: pr.htmlUrl, designSystemPendingPrBranch: branchName, ciAutofixAttempts: 0 })
     .where(eq(workspace.id, workspaceId));
   revalidatePath(SETTINGS_PATH);
 
@@ -291,7 +291,7 @@ export async function confirmAndMergePendingPr(): Promise<void> {
   await mergePullRequest(Number(match[1]));
   await db
     .update(workspace)
-    .set({ designSystemPendingPrUrl: null, designSystemPendingPrBranch: null })
+    .set({ designSystemPendingPrUrl: null, designSystemPendingPrBranch: null, ciAutofixAttempts: 0 })
     .where(eq(workspace.id, workspaceId));
 
   revalidatePath(SETTINGS_PATH);
