@@ -84,12 +84,20 @@ export interface ComponentRef {
 export type ComponentIndex = Map<string, ComponentRef>;
 
 // Keep the distilled spec bounded so a huge component set (Avatar is 36
-// variants of deep trees) can't blow the prompt budget. Depth 4 keeps the
-// meaningful structure (Container -> content, icon instance + its size) while
-// dropping the innermost vector/boolean leaves that add lines without design
-// info. A normal component fits far under the line cap; only very large sets
-// truncate, and the model can extrapolate the regular size progression.
-const MAX_DEPTH = 4;
+// variants of deep trees) can't blow the prompt budget. MAX_LINES is the real
+// guard; MAX_DEPTH just stops descent into the innermost vector/boolean leaves.
+//
+// Depth 6 (not 4): composition (an INSTANCE of another design-system component)
+// is the single most important structural fact for the model -- it decides
+// whether the component IMPORTS a real sibling or re-implements it -- and those
+// instances can sit several frames deep. Real case: the Accordion's chevron is
+// an INSTANCE of outline-regular-chevrondown nested at
+// SET>COMPONENT>Top>Right>ChevronContainer>Icon (depth 5); at depth 4 the
+// distiller stopped one level short, never emitted the `USE` marker, and the
+// model hallucinated a wrong (right-pointing) chevron instead of composing the
+// real down-chevron. An INSTANCE ends descent anyway (its internals belong to
+// the composed component), so reaching one adds a single line, not a subtree.
+const MAX_DEPTH = 6;
 const MAX_LINES = 900;
 
 function round(n: number): number {

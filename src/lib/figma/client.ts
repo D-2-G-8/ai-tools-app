@@ -119,6 +119,27 @@ export async function getFileNodes<T>(fileKey: string, nodeIds: string[], access
   return figmaGet<T>(`/files/${fileKey}/nodes?ids=${ids}&geometry=paths`, accessToken, FIGMA_FILE_FETCH_TIMEOUT_MS);
 }
 
+/**
+ * GET /v1/files/:key/nodes but DEPTH-LIMITED and WITHOUT `geometry=paths` -- for
+ * callers that only need shallow node properties (fills, strokes, corner radii,
+ * text styles) across a subtree, not vector path data. Critical for cost: the
+ * full-subtree + geometry variant above is ~52MB for this file (see sync.ts's
+ * fetchNodesBatched depth=1 note) and blows the request timeout; a bounded depth
+ * with no geometry keeps token harvesting (deriveTokensFromComponents) cheap
+ * enough to run inside the sync's budget. `timeoutMs` defaults shorter than the
+ * full-file allowance so one slow node fetch can't stall the whole sync.
+ */
+export async function getFileNodesShallow<T>(
+  fileKey: string,
+  nodeIds: string[],
+  accessToken: string,
+  depth: number,
+  timeoutMs = 15_000,
+): Promise<T> {
+  const ids = encodeURIComponent(nodeIds.join(","));
+  return figmaGet<T>(`/files/${fileKey}/nodes?ids=${ids}&depth=${depth}`, accessToken, timeoutMs);
+}
+
 interface FigmaImagesResponse {
   images: Record<string, string | null>;
   err?: string | null;

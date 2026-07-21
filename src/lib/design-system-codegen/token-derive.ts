@@ -2,8 +2,8 @@ import "server-only";
 import { db } from "@/db";
 import { designComponent, designToken } from "@/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
-import { getFileNodes } from "@/lib/figma/client";
-import { colorToCss, solidFill, radiusOf, type FigmaNode, type FigmaNodesResponse } from "./figma-node";
+import { getFileNodesShallow, describeFigmaError } from "@/lib/figma/client";
+import { solidFill, radiusOf, type FigmaNode, type FigmaNodesResponse } from "./figma-node";
 import { toCssVarName } from "./tokens";
 
 /**
@@ -29,12 +29,26 @@ import { toCssVarName } from "./tokens";
 // reconcile below only ever prunes rows this pass owns.
 const DERIVED_MARKER = "(derived from component usage)";
 
-// Bound the crawl so a few dozen components with deep trees can't blow up the
-// request: enough depth to reach the styled leaves (backgrounds, borders,
-// text), capped total nodes as a hard stop.
-const MAX_DEPTH = 6;
+// Bound the crawl so a few dozen components with deep variant trees can't blow
+// up the sync request. Two independent guards:
+//  - the FETCH is depth-limited and geometry-free (getFileNodesShallow), so the
+//    network payload stays small -- a FULL subtree + geometry is ~52MB for this
+//    file and times the request out (see sync.ts fetchNodesBatched's note); and
+//  - an overall wall-clock BUDGET, so even if Figma is slow the derivation
+//    stops early with a partial palette rather than starving the metadata sync.
+// FETCH_DEPTH reaches the styled leaves (set -> variant -> frame -> element ->
+// shape/text); MAX_DEPTH mirrors it for the in-memory walk.
+const FETCH_DEPTH = 4;
+const MAX_DEPTH = 4;
 const MAX_NODES = 8000;
-const NODES_BATCH = 10;
+const NODES_BATCH = 5;
+// Fetch batches concurrently -- Figma's per-request latency is dominated by its
+// server-side tree serialization (a depth-4 batch takes seconds regardless of
+// size), so running a few in parallel cuts wall-clock several-fold and keeps the
+// whole derivation well inside the sync budget.
+const FETCH_CONCURRENCY = 4;
+const PER_BATCH_TIMEOUT_MS = 15_000;
+const OVERALL_BUDGET_MS = 25_000;
 
 interface Harvested {
   /** css color value -> a Figma node id it appeared on (for figma_node_id). */
@@ -102,16 +116,38 @@ export async function deriveTokensFromComponents(
   const rootIds = components.map((c) => c.figmaNodeIds[0]).filter((id): id is string => Boolean(id));
   if (rootIds.length === 0) return { colors: 0, radii: 0 };
 
+  const batches: string[][] = [];
+  for (let i = 0; i < rootIds.length; i += NODES_BATCH) batches.push(rootIds.slice(i, i + NODES_BATCH));
+
   const acc: Harvested = { colors: new Map(), radii: new Map() };
   const budget = { n: 0 };
-  for (let i = 0; i < rootIds.length; i += NODES_BATCH) {
-    const batch = rootIds.slice(i, i + NODES_BATCH);
-    const res = await getFileNodes<FigmaNodesResponse>(fileKey, batch, accessToken);
-    for (const id of batch) {
-      const doc = res.nodes[id]?.document;
-      if (doc) walk(doc, acc, budget, 0);
+  const deadline = Date.now() + OVERALL_BUDGET_MS;
+
+  // Run batches in concurrent waves, stopping early if the node budget or the
+  // wall-clock deadline is hit -- so the derivation degrades to a partial
+  // palette rather than ever stalling the metadata sync it augments.
+  for (let i = 0; i < batches.length; i += FETCH_CONCURRENCY) {
+    if (budget.n >= MAX_NODES || Date.now() >= deadline) break;
+    const wave = batches.slice(i, i + FETCH_CONCURRENCY);
+    const responses = await Promise.all(
+      wave.map((batch) =>
+        // Shallow + geometry-free so payloads stay small; short per-batch
+        // timeout so one slow component can't stall the sync. A failed batch
+        // just contributes nothing.
+        getFileNodesShallow<FigmaNodesResponse>(fileKey, batch, accessToken, FETCH_DEPTH, PER_BATCH_TIMEOUT_MS).catch(
+          (err) => {
+            console.warn(`[figma-sync] token-derive batch failed (partial palette kept): ${describeFigmaError(err)}`);
+            return null;
+          },
+        ),
+      ),
+    );
+    for (const res of responses) {
+      if (!res) continue;
+      for (const entry of Object.values(res.nodes)) {
+        if (entry?.document) walk(entry.document, acc, budget, 0);
+      }
     }
-    if (budget.n >= MAX_NODES) break;
   }
 
   const keptNames = new Set<string>();

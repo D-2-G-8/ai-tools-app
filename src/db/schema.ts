@@ -493,6 +493,20 @@ export interface DesignComponentState {
 export const codeSyncStatusValues = ["never", "pending", "committed", "failed"] as const;
 export type CodeSyncStatus = (typeof codeSyncStatusValues)[number];
 
+/**
+ * The generated component's API contract (props + tokens + class names),
+ * persisted so a DEPENDENT component's codegen/review can validate the values
+ * it passes to this one (and so the self gate can validate this component's own
+ * stories). Null for icons (no LLM contract) and for components committed
+ * before this column existed (their composition just can't be value-checked
+ * until they regenerate). Only `props[].{name,type}` is read by the gates.
+ */
+export interface StoredComponentContract {
+  props: { name: string; type: string; description?: string }[];
+  cssVariables?: string[];
+  classNames?: string[];
+}
+
 export const designComponent = pgTable(
   "design_component",
   {
@@ -521,6 +535,9 @@ export const designComponent = pgTable(
     lastCodeSyncAt: timestamp("last_code_sync_at", { withTimezone: true }),
     lastCodeCommitSha: varchar("last_code_commit_sha", { length: 64 }),
     codeSyncStatus: varchar("code_sync_status", { length: 16 }).notNull().default("never"),
+    // See StoredComponentContract above. Written on a successful LLM-path
+    // commit (route.ts); never by the metadata-only Figma sync.
+    contractJson: jsonb("contract_json").$type<StoredComponentContract>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

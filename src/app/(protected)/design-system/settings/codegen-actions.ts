@@ -57,13 +57,15 @@ async function commitTokensCss(workspaceId: string, branchName: string): Promise
  * in a single level (the old flat behavior) plus an `error` note -- generation
  * still works, composites just fall back to inlining whatever isn't committed.
  */
-export async function computeCodegenPlan(slugs: string[]): Promise<{ levels: string[][]; error?: string }> {
-  if (slugs.length === 0) return { levels: [] };
+export async function computeCodegenPlan(
+  slugs: string[],
+): Promise<{ levels: string[][]; edges: Record<string, string[]>; error?: string }> {
+  if (slugs.length === 0) return { levels: [], edges: {} };
   try {
     const workspaceId = await getCurrentWorkspaceId();
     const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
     const token = await getValidFigmaAccessToken();
-    if (!ws?.figmaFileKey || !token) return { levels: [slugs] };
+    if (!ws?.figmaFileKey || !token) return { levels: [slugs], edges: {} };
 
     // Index over ALL components so any INSTANCE resolves; order only the run set.
     const all = await db
@@ -74,10 +76,13 @@ export async function computeCodegenPlan(slugs: string[]): Promise<{ levels: str
     const runComponents = all.filter((c) => runSet.has(c.slug));
 
     const index = buildComponentIndex(all);
+    // slug -> its direct dependency slugs; returned to the panel so it can skip a
+    // component whose dependency failed (a Map doesn't cross the server-action
+    // boundary cleanly, so hand back a plain object).
     const edges = await buildDependencyEdges(runComponents, ws.figmaFileKey, token, index);
-    return { levels: topoLevels(slugs, edges) };
+    return { levels: topoLevels(slugs, edges), edges: Object.fromEntries(edges) };
   } catch (err) {
-    return { levels: [slugs], error: describeFigmaError(err) };
+    return { levels: [slugs], edges: {}, error: describeFigmaError(err) };
   }
 }
 
@@ -91,23 +96,36 @@ export async function computeCodegenPlan(slugs: string[]): Promise<{ levels: str
  * Best-effort like computeCodegenPlan: if Figma isn't connected or anything
  * fails, falls back to generating just the one component.
  */
-export async function computeClosurePlan(rootSlug: string): Promise<{ levels: string[][]; error?: string }> {
+export async function computeClosurePlan(
+  rootSlug: string,
+): Promise<{ levels: string[][]; edges: Record<string, string[]>; committed: string[]; error?: string }> {
   try {
     const workspaceId = await getCurrentWorkspaceId();
     const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
     const token = await getValidFigmaAccessToken();
-    if (!ws?.figmaFileKey || !token) return { levels: [[rootSlug]] };
+    if (!ws?.figmaFileKey || !token) return { levels: [[rootSlug]], edges: {}, committed: [] };
 
     const all = await db
-      .select({ slug: designComponent.slug, figmaNodeIds: designComponent.figmaNodeIds, isIcon: designComponent.isIcon })
+      .select({
+        slug: designComponent.slug,
+        figmaNodeIds: designComponent.figmaNodeIds,
+        isIcon: designComponent.isIcon,
+        codeSyncStatus: designComponent.codeSyncStatus,
+      })
       .from(designComponent)
       .where(eq(designComponent.workspaceId, workspaceId));
 
     const index = buildComponentIndex(all);
     const { slugs, edges } = await dependencyClosure(rootSlug, all, ws.figmaFileKey, token, index);
-    return { levels: topoLevels(slugs, edges) };
+    // Closure members already committed to the repo -- the panel skips these so
+    // regenerating a component doesn't rebuild its already-built dependencies.
+    const inClosure = new Set(slugs);
+    const committed = all
+      .filter((c) => inClosure.has(c.slug) && c.codeSyncStatus === "committed")
+      .map((c) => c.slug);
+    return { levels: topoLevels(slugs, edges), edges: Object.fromEntries(edges), committed };
   } catch (err) {
-    return { levels: [[rootSlug]], error: describeFigmaError(err) };
+    return { levels: [[rootSlug]], edges: {}, committed: [], error: describeFigmaError(err) };
   }
 }
 
