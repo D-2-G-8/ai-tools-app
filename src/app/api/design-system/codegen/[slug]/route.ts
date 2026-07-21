@@ -11,7 +11,7 @@ import { loadTokensForCss } from "@/lib/design-system-codegen/data";
 import { fetchComponentDesignSpec } from "@/lib/design-system-codegen/figma-node";
 import { buildComponentIndex } from "@/lib/design-system-codegen/dependencies";
 import { getValidFigmaAccessToken, describeFigmaError } from "@/lib/figma/client";
-import { commitFiles } from "@/lib/github/client";
+import { commitFiles, listBranchPaths } from "@/lib/github/client";
 
 export const dynamic = "force-dynamic";
 // One component's contract+TSX+CSS+stories generation and GitHub commit,
@@ -81,7 +81,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     // Figma isn't connected (no token) or the file key is missing, or the
     // fetch fails, we fall back to label-only generation rather than failing.
     let designSpec: string | undefined;
-    let uses: { slug: string; componentName: string }[] | undefined;
+    let uses: { slug: string; componentName: string; isIcon: boolean }[] | undefined;
     if (ws.figmaFileKey && component.figmaNodeIds.length > 0) {
       try {
         const figmaToken = await getValidFigmaAccessToken();
@@ -105,7 +105,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
           );
           if (design) {
             designSpec = design.spec;
-            uses = design.uses.map((u) => ({ slug: u.slug, componentName: u.componentName }));
+            uses = design.uses.map((u) => ({ slug: u.slug, componentName: u.componentName, isIcon: u.isIcon }));
           }
         }
       } catch (err) {
@@ -125,11 +125,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     };
     const generated = await generateComponentCode(model, forCodegen, tokens);
 
+    // Only delete legacy files that actually exist on the branch -- the Git
+    // tree API 422s ("BadObjectState") on a deletion of a path that isn't
+    // there (so a first-ever generation, with no legacy files, wouldn't fail).
+    let deletions: string[] = [];
+    if (generated.deletePaths.length > 0) {
+      const onBranch = await listBranchPaths(branch);
+      deletions = onBranch ? generated.deletePaths.filter((p) => onBranch.has(p)) : [];
+    }
+
     const sha = await commitFiles(branch, `Generate ${generated.componentName} from Figma`, [
       { path: generated.tsxPath, content: generated.tsxContent },
       { path: generated.cssPath, content: generated.cssContent },
       { path: generated.storiesPath, content: generated.storiesContent },
       { path: generated.indexPath, content: generated.indexContent },
+      ...deletions.map((path) => ({ path, content: null as string | null })),
     ]);
 
     await db

@@ -67,7 +67,7 @@ export interface ComponentForCodegen {
    * it. These must already be generated (the codegen orchestrator emits them
    * in dependency order -- see dependencies.ts).
    */
-  uses?: { slug: string; componentName: string }[];
+  uses?: { slug: string; componentName: string; isIcon: boolean }[];
 }
 
 export interface GeneratedComponentFiles {
@@ -81,6 +81,11 @@ export interface GeneratedComponentFiles {
   storiesContent: string;
   indexPath: string;
   indexContent: string;
+  /** Stale files to delete in the same commit -- e.g. a digit-leading slug that
+   *  previously filed under its (invalid-identifier) pascalCase name and now
+   *  files under the "N"-prefixed one; removing the old ones avoids orphaned
+   *  duplicate files/stories breaking the build. Empty in the common case. */
+  deletePaths: string[];
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
@@ -165,7 +170,11 @@ export interface ComponentSourcePaths {
  * writes and deletes always target the same folder.
  */
 export function componentSourcePaths(slug: string, isIcon: boolean): ComponentSourcePaths {
-  const componentName = pascalCase(slug);
+  // File name == the exported identifier, so imports never have to juggle two
+  // different names (a digit-leading slug files as "N24OutlineOrders.tsx", not
+  // "24OutlineOrders.tsx" -- keeps every self/story/composition import a single
+  // consistent name the model can't get wrong).
+  const componentName = componentIdentifier(slug);
   const dir = `src/${isIcon ? "icons" : "components"}/${slug}`;
   return {
     dir,
@@ -252,9 +261,20 @@ async function generateTsx(
       `CSS Modules class names available (import from "./${fileBase}.module.scss" as \`styles\`, reference ONLY via styles.<name>, exactly these names): ${contract.classNames.join(", ")}`,
       component.uses && component.uses.length > 0
         ? "\nThis component COMPOSES other design-system components -- the design spec marks their spots as " +
-          "`USE <Name>`. For each, IMPORT it from its sibling module and RENDER it there; do NOT re-implement its " +
-          "markup/SVG/styles. Available components (import name from path):\n" +
-          component.uses.map((u) => `- import { ${u.componentName} } from "../${u.slug}";`).join("\n") +
+          "`USE <Name>`. For each, IMPORT it using EXACTLY the path below and RENDER it there; do NOT re-implement " +
+          "its markup/SVG/styles, and do NOT change the import path. Available components:\n" +
+          component.uses
+            .map((u) => {
+              // Components live in src/components/<slug>, icons in src/icons/<slug>.
+              // From this component's dir the path to a same-kind dependency is
+              // "../<slug>"; to a different-kind one it must cross folders.
+              const path =
+                u.isIcon === component.isIcon
+                  ? `../${u.slug}`
+                  : `../../${u.isIcon ? "icons" : "components"}/${u.slug}`;
+              return `- import { ${u.componentName} } from "${path}";`;
+            })
+            .join("\n") +
           "\nPass the instance's props(...) from the spec through to the component's props as sensible."
         : "",
       "",
@@ -538,6 +558,17 @@ export async function generateComponentCode(
     storiesContent: stories.content,
     indexPath: paths.indexPath,
     indexContent: `export { ${componentName} } from "./${fileBase}";\nexport type { ${componentName}Props } from "./${fileBase}";\n`,
+    // Legacy files from when a digit-leading slug filed under its pascalCase
+    // name (an invalid identifier); the file base is now componentIdentifier,
+    // so remove the old-named tsx/scss/stories to avoid orphaned duplicates.
+    deletePaths:
+      pascalCase(component.slug) === fileBase
+        ? []
+        : [
+            `${paths.dir}/${pascalCase(component.slug)}.tsx`,
+            `${paths.dir}/${pascalCase(component.slug)}.module.scss`,
+            `${paths.dir}/${pascalCase(component.slug)}.stories.tsx`,
+          ],
     inputTokens,
     outputTokens,
     costUsd: estimateCostUsd(model, inputTokens, outputTokens),
