@@ -254,7 +254,12 @@ async function generateTsx(
           "arbitrary inline `<svg>`, and do NOT drop an empty placeholder (`<span/>`) in its place -- all three are " +
           "failures to compose. If which instance to render depends on THIS component's own variant (e.g. a 24px vs " +
           "16px icon per button size, or an open vs closed chevron), branch on the variant and render the correct " +
-          "real component with the correct props -- still never a generic slot."
+          "real component with the correct props -- still never a generic slot. " +
+          "The spec writes instance props as raw Figma variant LABELS (e.g. `props(Appearance=Negative, Size=32 px, " +
+          "Square=Off)`). These are NOT the composed component's actual prop values -- convert them: design-system " +
+          "enum values are lowercase without units (`appearance=\"negative\"`, `size=\"32\"`), and On/Off booleans are " +
+          "real booleans (`square={false}`). Passing a capitalized label (`appearance=\"Negative\"`) or a unit string " +
+          "(`size=\"32 px\"`) is a TYPE ERROR that fails the build."
         : "",
       "",
       "Requirements:",

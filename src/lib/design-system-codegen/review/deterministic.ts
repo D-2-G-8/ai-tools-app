@@ -34,6 +34,26 @@ function gateStoriesSelfImport(files: GeneratedFiles, ctx: ReviewContext): Findi
   return null;
 }
 
+/** A1b: the tsx must import its stylesheet as `./<fileBase>.module.scss` with
+ *  EXACT casing -- a case-sensitive build (Vercel/rollup) can't resolve
+ *  `./BadgeCount.module.scss` for a file named `Badgecount.module.scss`.
+ *  Deterministically fixable. */
+function gateScssImport(files: GeneratedFiles, ctx: ReviewContext): Finding | null {
+  const m = files.tsx.match(/from\s*["'](\.\/[A-Za-z0-9_$]+\.module\.scss)["']/);
+  if (!m) return null; // no local scss import -- not this gate's job to force one
+  const correct = `./${ctx.fileBase}.module.scss`;
+  if (m[1] !== correct) {
+    return {
+      id: "scss-import-case",
+      severity: "build-breaking",
+      file: "tsx",
+      message: `tsx imports its stylesheet as "${m[1]}" but the file is "${correct}" (exact case -- a case-sensitive build can't resolve it).`,
+      suggestion: correct,
+    };
+  }
+  return null;
+}
+
 /** A2: a lone `import React from "react"` with no `React.` reference is an
  *  unused import under the automatic JSX runtime (TS6133 breaks the build).
  *  The design-system uses the automatic runtime (confirmed: TS6133 fired on a
@@ -99,6 +119,9 @@ export function runDeterministicGates(files: GeneratedFiles, ctx: ReviewContext)
   const selfImport = gateStoriesSelfImport(files, ctx);
   if (selfImport) findings.push(selfImport);
 
+  const scssImport = gateScssImport(files, ctx);
+  if (scssImport) findings.push(scssImport);
+
   const reactTsx = gateUnusedReactImport(files.tsx, "tsx");
   if (reactTsx) findings.push(reactTsx);
   const reactStories = gateUnusedReactImport(files.stories, "stories");
@@ -155,6 +178,11 @@ export function applyDeterministicFixes(files: GeneratedFiles, findings: Finding
         sugg,
       );
     }
+  }
+
+  if (ids.has("scss-import-case")) {
+    const sugg = findings.find((f) => f.id === "scss-import-case")?.suggestion;
+    if (sugg) tsx = tsx.replace(/(from\s*["'])\.\/[A-Za-z0-9_$]+\.module\.scss(["'])/, `$1${sugg}$2`);
   }
 
   if (ids.has("unused-react-import")) {
