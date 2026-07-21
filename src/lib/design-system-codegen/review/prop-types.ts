@@ -75,22 +75,35 @@ function tagAttrChunks(source: string, tag: string): string[] {
   return chunks;
 }
 
+/** Scan a quoted string run starting at index `i` (where `s[i]` is the
+ *  opening `"`/`'`). A quoted string is lexically atomic REGARDLESS of
+ *  bracket-nesting depth -- callers must not let any character inside the
+ *  run (including stray/unbalanced brackets) perturb their own depth
+ *  counter. Returns the index just past the closing quote, or `s.length` if
+ *  the string is unterminated. */
+function scanQuotedRun(s: string, i: number): number {
+  const quote = s[i];
+  let j = i + 1;
+  while (j < s.length && s[j] !== quote) j++;
+  return j < s.length ? j + 1 : j; // include closing quote if present
+}
+
 /** Mask every brace-depth-aware `{...}` group and every quoted `"..."`/`'...'`
  *  string in `s` with spaces of equal length, leaving everything else (and
  *  the overall string length/positions) untouched. Used so the bare-boolean
  *  pass never sees identifiers that live inside an expression or a string --
- *  it only sees genuine standalone attribute names. */
+ *  it only sees genuine standalone attribute names. Quote handling is
+ *  depth-independent: a `"`/`'` opens a scan-to-matching-close at ANY depth
+ *  (not just depth 0), so a stray `{`/`}` inside a nested quoted string never
+ *  desyncs the depth counter. */
 function maskBracesAndStrings(s: string): string {
   let out = "";
   let depth = 0;
   let i = 0;
   while (i < s.length) {
     const c = s[i];
-    if (depth === 0 && (c === '"' || c === "'")) {
-      const quote = c;
-      let j = i + 1;
-      while (j < s.length && s[j] !== quote) j++;
-      const end = j < s.length ? j + 1 : j; // include closing quote if present
+    if (c === '"' || c === "'") {
+      const end = scanQuotedRun(s, i);
       out += " ".repeat(end - i);
       i = end;
       continue;
@@ -152,26 +165,26 @@ export function parseJsxLiteralProps(source: string, tag: string): ParsedProp[] 
 
 /** Mask every depth-aware `{...}`, `[...]`, and `(...)` group in `s` with
  *  spaces of equal length, leaving everything else (and the overall string
- *  length/positions) untouched. Quote-aware like `maskBracesAndStrings`: a
- *  `"..."`/`'...'` run at depth 0 is copied verbatim (not masked) so a
- *  top-level string arg value survives for the `name: value` regex, and any
- *  `(`/`[`/`{` characters inside it never perturb depth tracking -- without
- *  this, a string like `"Click (here) to continue"` would be misread as
- *  opening a nested group. Used so the top-level `name: value` pair regex
- *  never re-scans the inside of a nested object/array/call value as if it
- *  were more top-level pairs. */
+ *  length/positions) untouched. Quote-aware like `maskBracesAndStrings`, and
+ *  depth-independent: a `"..."`/`'...'` run is scanned to its matching close
+ *  at ANY depth (not just depth 0), so any `(`/`[`/`{` characters inside it
+ *  never perturb depth tracking -- without this, an unbalanced bracket
+ *  inside a nested string (e.g. `{ style: { note: "a[b" } }`) would desync
+ *  the depth counter and silently drop every following top-level pair. At
+ *  depth 0 the quoted run is copied verbatim (preserving a top-level string
+ *  arg value for the `name: value` regex); at depth >= 1 it's masked to
+ *  spaces like the rest of the nested group. Used so the top-level
+ *  `name: value` pair regex never re-scans the inside of a nested
+ *  object/array/call value as if it were more top-level pairs. */
 function maskNestedGroups(s: string): string {
   let out = "";
   let depth = 0;
   let i = 0;
   while (i < s.length) {
     const c = s[i];
-    if (depth === 0 && (c === '"' || c === "'")) {
-      const quote = c;
-      let j = i + 1;
-      while (j < s.length && s[j] !== quote) j++;
-      const end = j < s.length ? j + 1 : j; // include closing quote if present
-      out += s.slice(i, end); // copy verbatim -- preserve the string value
+    if (c === '"' || c === "'") {
+      const end = scanQuotedRun(s, i);
+      out += depth === 0 ? s.slice(i, end) : " ".repeat(end - i);
       i = end;
       continue;
     }
