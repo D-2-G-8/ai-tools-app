@@ -165,7 +165,7 @@ const contractSchema = z.object({
     ),
 });
 
-type ComponentContract = z.infer<typeof contractSchema>;
+export type ComponentContract = z.infer<typeof contractSchema>;
 
 /** The subset of a component's persisted contract a DEPENDENT needs. */
 export type ChildContract = StoredComponentContract;
@@ -552,6 +552,27 @@ async function holisticFix(
     inputTokens: result.usage?.inputTokens ?? 0,
     outputTokens: result.usage?.outputTokens ?? 0,
   };
+}
+
+/**
+ * Run the holistic autofix over an EXISTING component's files against a set
+ * of findings (e.g. real tsc errors reported by the design-system repo's own
+ * CI, rather than this pipeline's own review layer). Reuses the exact same
+ * fixer the generation review loop uses (holisticFix, internal to this
+ * module) -- the caller supplies the files (read from the branch), the
+ * persisted contract, and the composed children's contracts, since a CI-
+ * triggered fix has none of those freshly in hand the way a just-generated
+ * component does.
+ */
+export async function fixComponentFiles(
+  model: string,
+  component: ComponentForCodegen,
+  contract: ComponentContract,
+  files: GeneratedFiles,
+  findings: { file: string; message: string }[],
+  childContracts?: Map<string, ChildContract>,
+): Promise<{ files: GeneratedFiles; inputTokens: number; outputTokens: number }> {
+  return holisticFix(model, component, contract, files, findings, componentIdentifier(component.slug), childContracts);
 }
 
 /**

@@ -182,6 +182,10 @@ export const workspace = pgTable("workspace", {
   // all land on the same not-yet-merged PR instead of opening parallel
   // duplicate ones (see src/lib/design-system-codegen/session.ts).
   designSystemPendingPrBranch: text("design_system_pending_pr_branch"),
+  // Consecutive CI typecheck auto-fix rounds since the last green typecheck --
+  // reset to 0 on success, bumped each button click; the UI escalates to a
+  // human past a threshold instead of looping forever.
+  ciAutofixAttempts: integer("ci_autofix_attempts").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

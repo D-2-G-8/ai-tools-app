@@ -1,0 +1,1 @@
+ALTER TABLE "workspace" ADD COLUMN "ci_autofix_attempts" integer DEFAULT 0 NOT NULL;

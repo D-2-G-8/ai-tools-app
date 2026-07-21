@@ -92,6 +92,13 @@
       "when": 1784649374334,
       "tag": "0012_add_component_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1784666487720,
+      "tag": "0013_add_ci_autofix_attempts",
+      "breakpoints": true
     }
   ]
 }
