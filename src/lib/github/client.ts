@@ -218,6 +218,58 @@ export async function listBranchPaths(branch: string): Promise<Set<string> | nul
   return new Set(tree.tree.filter((t) => t.type === "blob").map((t) => t.path));
 }
 
+/** A single file's UTF-8 contents on a branch, or null if it doesn't exist. */
+export async function getBranchFile(branch: string, path: string): Promise<string | null> {
+  const { owner, repo } = getConfig();
+  try {
+    const res = await githubFetch<{ content: string; encoding: string }>(
+      `/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`,
+    );
+    return res.encoding === "base64" ? Buffer.from(res.content, "base64").toString("utf8") : res.content;
+  } catch (err) {
+    if (err instanceof Error && /returned 404/.test(err.message)) return null;
+    throw err;
+  }
+}
+
+export interface TscAnnotation {
+  path: string;
+  line: number;
+  message: string;
+}
+
+export interface TypecheckStatus {
+  conclusion: "success" | "failure" | "pending" | "missing";
+  annotations: TscAnnotation[];
+}
+
+/** The design-system CI's typecheck result for a branch head, with the tsc
+ *  errors as structured annotations (emitted by .github/tsc.json). "missing" =
+ *  no branch / no CI run yet; "pending" = CI still running. */
+export async function getTypecheckAnnotations(branch: string): Promise<TypecheckStatus> {
+  const { owner, repo } = getConfig();
+  const sha = await getBranchSha(branch);
+  if (!sha) return { conclusion: "missing", annotations: [] };
+
+  const runs = await githubFetch<{
+    check_runs: { id: number; name: string; status: string; conclusion: string | null }[];
+  }>(`/repos/${owner}/${repo}/commits/${sha}/check-runs`);
+  // The workflow job is `ci` -> the check-run's name is the job name. Fall back
+  // to any run if the name ever changes.
+  const ci = runs.check_runs.find((r) => r.name === "ci") ?? runs.check_runs[0];
+  if (!ci) return { conclusion: "missing", annotations: [] };
+  if (ci.status !== "completed") return { conclusion: "pending", annotations: [] };
+  if (ci.conclusion === "success") return { conclusion: "success", annotations: [] };
+
+  const raw = await githubFetch<
+    { path: string; start_line: number; message: string; annotation_level: string }[]
+  >(`/repos/${owner}/${repo}/check-runs/${ci.id}/annotations`);
+  const annotations = raw
+    .filter((a) => a.annotation_level === "failure" || a.annotation_level === "warning")
+    .map((a) => ({ path: a.path, line: a.start_line, message: a.message }));
+  return { conclusion: "failure", annotations };
+}
+
 export interface CommitFile {
   path: string;
   /** null deletes this path from the tree (see commitFiles below). */
