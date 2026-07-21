@@ -8,6 +8,7 @@ import { groupAnnotationsByComponent, importSlug } from "./ci-map";
 import { parseCompositionImports } from "./review/prop-types";
 import { fixComponentFiles, type ComponentForCodegen, type ChildContract, type ComponentContract } from "./component";
 import { componentSourcePaths } from "./paths";
+import { loadTokensForCss } from "./data";
 
 // Bound: ~1 LLM call each, keeps the whole round comfortably under the
 // route's 60s budget even for the slowest components.
@@ -66,6 +67,9 @@ export async function autofixTypeErrorsFromCi(workspaceId: string, userId: strin
   const fixable = groups.filter((g) => !g.isIcon).slice(0, MAX_FIX_PER_CLICK);
 
   const model = await getEffectiveModel(workspaceId, "design-system-codegen");
+  // The synced tokens, so a fix for an "unknown token var" error can map to a
+  // real token (or know to inline when none matches) instead of re-inventing.
+  const availableTokens = await loadTokensForCss(workspaceId);
   const fixed: string[] = [];
   const failed: string[] = [];
 
@@ -140,6 +144,7 @@ export async function autofixTypeErrorsFromCi(workspaceId: string, userId: strin
         { tsx, css: css ?? "", stories: stories ?? "", index: "" },
         g.findings,
         childContracts,
+        availableTokens,
       );
 
       await commitFiles(branch, `Fix type errors in ${paths.componentName} (CI)`, [

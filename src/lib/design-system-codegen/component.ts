@@ -341,8 +341,8 @@ async function generateCss(
       `Write a rule for EVERY one of these class names, copied character-for-character, all camelCase (e.g. .buttonPrimary) -- do NOT rename to kebab-case or BEM, do NOT add or drop any, and do NOT leave any without its own selector (even a boolean/marker modifier like .withBadge MUST get a rule, even if minimal): ${contract.classNames.join(", ")}. You MAY additionally combine them in compound/nested selectors (e.g. \`.squared.sizeMd\`, \`.avatar .badge\`) for variant-specific rules, but every class token used must be one of these exact names.`,
       "Each variant/state class must actually ENCODE the visual DIFFERENCE that variant shows in the design (its own color/rotation/border/size/position), NOT an empty rule or one identical to the base state -- a state class that renders the same as the base makes that prop do nothing. E.g. an `.opened` class should carry the transform/height/etc. that the opened variant differs by; a `.selected`/`.error`/`.disabled` class should carry its distinct color/border/opacity from the design.",
       "If an \"Actual Figma design\" block is given above, match its exact px dimensions, corner radii, gaps/padding, and per-variant typography -- these are the real measured values, use them.",
-      `Reference color/shadow values ONLY via the EXACT var() names below (they match the generated tokens.css; CSS custom properties are case-sensitive, so copy each var(--...) verbatim). Never a hardcoded color/shadow value, never a token not in this list; px sizes/radii/gaps from the design block are written directly:`,
-      chosenTokens.map((t) => `- var(--${toCssVarName(t.name)}) (${t.category}) = ${t.value}`).join("\n") || "(no tokens chosen)",
+      `Reference color/shadow values via the EXACT var() names below (they match the generated tokens.css; CSS custom properties are case-sensitive, so copy each var(--...) verbatim); px sizes/radii/gaps from the design block are written directly. CRITICAL: never write \`var(--x)\` for an x NOT in this list -- there is no --font-family-*, --text-primary, --focus-ring etc. unless it appears below. If the design needs a value with NO matching token here (a font-family, or a color/size the list doesn't cover), INLINE the literal value (e.g. \`font-family: 'Roboto Flex', sans-serif;\`, \`color: #1c1c1c;\`) or define a local \`--x:\` custom property in this stylesheet -- inlining is correct and expected in that case. Inventing a var() that isn't a real token below is the one thing that breaks the build:`,
+      chosenTokens.map((t) => `- var(--${toCssVarName(t.name)}) (${t.category}) = ${t.value}`).join("\n") || "(no tokens chosen -- inline literal values)",
       reviewFeedback
         ? "\nA prior version of THIS file failed review. You MUST fix ALL of these and change nothing else that was already correct:\n" +
           reviewFeedback
@@ -504,8 +504,13 @@ async function holisticFix(
   findings: { file: string; message: string; suggestion?: string }[],
   componentName: string,
   childContracts?: Map<string, ChildContract>,
+  availableTokens?: TokenForCss[],
 ): Promise<{ files: GeneratedFiles; inputTokens: number; outputTokens: number }> {
   const anthropic = await getAnthropicClient();
+  const tokenByName = new Map((availableTokens ?? []).map((t) => [t.name, t]));
+  const chosenTokens = contract.cssVariables
+    .map((name) => tokenByName.get(name))
+    .filter((t): t is TokenForCss => Boolean(t));
   const result = await generateText({
     model: anthropic(model),
     system:
@@ -517,6 +522,15 @@ async function holisticFix(
       "",
       `Component name: ${componentName}. CSS Modules class names (use these EXACT names, styles.<name>): ${contract.classNames.join(", ")}`,
       `Props: ${contract.props.map((p) => `${p.name}: ${p.type}`).join("; ")}`,
+      // The ONLY real token vars. An "unknown token var" finding means the scss
+      // wrote a var(--x) that isn't one of these -- the fix is to use a real one
+      // below OR (when nothing matches, e.g. a font-family / focus ring) INLINE
+      // the literal value / define a local --x:. Never re-reference an invented
+      // token (there is no --font-family-*, --text-primary, --focus-ring unless
+      // it appears here).
+      `Valid design-token vars (the ONLY var(--x) allowed in the scss; copy verbatim): ${
+        chosenTokens.map((t) => `var(--${toCssVarName(t.name)})=${t.value}`).join(", ") || "(none)"
+      }. For any value with no matching token here, INLINE the literal (e.g. font-family, a one-off color) or define a local \`--x:\` -- do NOT write var(--x) for an x not in this list.`,
       composedApiDescription(component, childContracts),
       component.uses && component.uses.length
         ? `Composed components must be imported with EXACTLY these statements (copy verbatim -- correct path AND name; do NOT rename or shorten):\n${[
@@ -571,8 +585,18 @@ export async function fixComponentFiles(
   files: GeneratedFiles,
   findings: { file: string; message: string }[],
   childContracts?: Map<string, ChildContract>,
+  availableTokens?: TokenForCss[],
 ): Promise<{ files: GeneratedFiles; inputTokens: number; outputTokens: number }> {
-  return holisticFix(model, component, contract, files, findings, componentIdentifier(component.slug), childContracts);
+  return holisticFix(
+    model,
+    component,
+    contract,
+    files,
+    findings,
+    componentIdentifier(component.slug),
+    childContracts,
+    availableTokens,
+  );
 }
 
 /**
@@ -687,7 +711,7 @@ export async function generateComponentCodeReviewed(
   };
 
   const applyFix = (f: GeneratedFiles, findings: Finding[]) =>
-    holisticFix(model, component, contract, f, findings, componentName, childContracts);
+    holisticFix(model, component, contract, f, findings, componentName, childContracts, availableTokens);
 
   const review = await reviewAndFix({
     model,
