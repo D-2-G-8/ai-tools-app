@@ -75,6 +75,49 @@ function tagAttrChunks(source: string, tag: string): string[] {
   return chunks;
 }
 
+/** Mask every brace-depth-aware `{...}` group and every quoted `"..."`/`'...'`
+ *  string in `s` with spaces of equal length, leaving everything else (and
+ *  the overall string length/positions) untouched. Used so the bare-boolean
+ *  pass never sees identifiers that live inside an expression or a string --
+ *  it only sees genuine standalone attribute names. */
+function maskBracesAndStrings(s: string): string {
+  let out = "";
+  let depth = 0;
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (depth === 0 && (c === '"' || c === "'")) {
+      const quote = c;
+      let j = i + 1;
+      while (j < s.length && s[j] !== quote) j++;
+      const end = j < s.length ? j + 1 : j; // include closing quote if present
+      out += " ".repeat(end - i);
+      i = end;
+      continue;
+    }
+    if (c === "{") {
+      depth++;
+      out += " ";
+      i++;
+      continue;
+    }
+    if (c === "}") {
+      depth = Math.max(0, depth - 1);
+      out += " ";
+      i++;
+      continue;
+    }
+    if (depth > 0) {
+      out += " ";
+      i++;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
 /** Literal attributes on `<tag ...>` occurrences. `p="s"`/`p={"s"}` -> string,
  *  `p={true}`/`p={false}` -> boolean, bare `p` -> boolean true, `p={other}` ->
  *  expr (skipped by the gate). */
@@ -94,12 +137,44 @@ export function parseJsxLiteralProps(source: string, tag: string): ParsedProp[] 
         out.push({ name: m[1], value: { kind: "boolean", v: inner === "true" } });
       else out.push({ name: m[1], value: { kind: "expr" } });
     }
-    // bare boolean prop: `name` not followed by `=` (and not part of name=...)
-    for (const m of attrs.matchAll(/(?:^|\s)([A-Za-z_][\w]*)(?=\s|$)/g)) {
+    // bare boolean prop: `name` not followed by `=` (and not part of name=...).
+    // Run against a masked copy so identifiers inside `{...}` expressions or
+    // quoted strings are never mistaken for standalone bare props.
+    const masked = maskBracesAndStrings(attrs);
+    for (const m of masked.matchAll(/(?:^|\s)([A-Za-z_][\w]*)(?=\s|$)/g)) {
       const name = m[1];
       if (out.some((p) => p.name === name)) continue; // already captured with a value
       out.push({ name, value: { kind: "boolean", v: true } });
     }
+  }
+  return out;
+}
+
+/** Mask every depth-aware `{...}`, `[...]`, and `(...)` group in `s` with
+ *  spaces of equal length, leaving everything else (and the overall string
+ *  length/positions) untouched. Used so the top-level `name: value` pair
+ *  regex never re-scans the inside of a nested object/array/call value as if
+ *  it were more top-level pairs. */
+function maskNestedGroups(s: string): string {
+  let out = "";
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === "{" || c === "[" || c === "(") {
+      depth++;
+      out += " ";
+      continue;
+    }
+    if (c === "}" || c === "]" || c === ")") {
+      depth = Math.max(0, depth - 1);
+      out += " ";
+      continue;
+    }
+    if (depth > 0) {
+      out += " ";
+      continue;
+    }
+    out += c;
   }
   return out;
 }
@@ -120,8 +195,11 @@ export function parseStoriesArgs(source: string): ParsedProp[] {
       else if (source[i] === "}") depth--;
     }
     const body = source.slice(start, i - 1);
+    // Mask nested groups so a nested object/array/call's inner commas and
+    // keys never get re-parsed as additional top-level pairs.
+    const maskedBody = maskNestedGroups(body);
     // top-level `name: value` pairs (depth-0 within body)
-    for (const pm of body.matchAll(/(?:^|[,{]\s*|\s)([A-Za-z_][\w]*)\s*:\s*("(?:[^"]*)"|'(?:[^']*)'|true|false|[^,}\n]+)/g)) {
+    for (const pm of maskedBody.matchAll(/(?:^|[,{]\s*|\s)([A-Za-z_][\w]*)\s*:\s*("(?:[^"]*)"|'(?:[^']*)'|true|false|[^,}\n]+)/g)) {
       const name = pm[1];
       const raw = pm[2].trim();
       const q = raw.match(/^"([^"]*)"$/) ?? raw.match(/^'([^']*)'$/);
