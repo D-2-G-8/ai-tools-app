@@ -248,7 +248,13 @@ async function generateTsx(
               return `- import { ${u.componentName} } from "${path}";`;
             })
             .join("\n") +
-          "\nPass the instance's props(...) from the spec through to the component's props as sensible."
+          "\nPass the instance's props(...) from the spec through to the component's props as sensible. " +
+          "CRITICAL: wherever the spec says `USE <X>`, you MUST import and render the REAL <X/> there. Do NOT " +
+          "substitute a generic slot prop (e.g. `icon?: React.ReactNode`) for the caller to fill, do NOT render an " +
+          "arbitrary inline `<svg>`, and do NOT drop an empty placeholder (`<span/>`) in its place -- all three are " +
+          "failures to compose. If which instance to render depends on THIS component's own variant (e.g. a 24px vs " +
+          "16px icon per button size, or an open vs closed chevron), branch on the variant and render the correct " +
+          "real component with the correct props -- still never a generic slot."
         : "",
       "",
       "Requirements:",
@@ -259,6 +265,7 @@ async function generateTsx(
       "- If an \"Actual Figma design\" block is given above, reproduce its DOM structure and per-variant behavior faithfully (the same nesting of container/content/badge elements, the same size/type/state branching) -- don't invent a different structure.",
       "- EVERY prop above comes from a real Figma variant/state, so EVERY prop MUST visibly change what renders -- the way those variants actually differ in the design block. An enum prop (size/type/variant/position) branches the classes or markup; a boolean prop (opened/checked/selected/disabled/error/active/loading) applies the exact visual change its variants show: a rotation/flip, a different color/fill/border, a shown-vs-hidden element, a moved or reordered element, a swapped icon direction. A prop the component destructures but that never changes the output (beyond gating a child's presence) is a BUG -- consuming `opened` to render the body but leaving the chevron identical open vs closed is exactly this failure. If the design block shows how a variant differs, implement that difference; leave NO prop visually inert.",
       "- Apply each such state-driven change through EXACTLY ONE mechanism -- never two that compound. Two ways this bites: (a) the SAME transform in both an inline `style={{ transform: ... }}` AND a CSS rule (180deg + 180deg = 360deg, so it visibly doesn't move); and (b) swapping to a DIFFERENT icon per state AND rotating it. If the design uses distinct glyphs per state and you compose them (e.g. `<ChevronDown/>` when closed, `<ChevronUp/>` when open), that icon ALREADY points the right way -- do NOT also add a CSS `rotate` to it, or the rotation fights the swap (an up-chevron rotated 180deg looks like a down-chevron again, exactly the bug it seems fixed but isn't). CHOOSE ONE: either swap the icon per state and add NO rotation, OR render a single fixed icon and rotate it via one CSS class. Prefer the icon swap when the design provides both glyphs as separate components.",
+      "- Drive POINTER states (hover / active / focus / focus-visible) purely with CSS pseudo-classes in the stylesheet (`&:hover`, `&:active`, `&:focus-visible`). Do NOT ALSO track them in React state -- no `isHovered`/`isActive` `useState` with `onMouseEnter`/`onMouseDown` handlers toggling `.stateHover`/`.stateActive` classes. Mirroring a pointer state in both JS and CSS is the same double-mechanism failure (and re-renders on every hover). Reserve React state strictly for LOGICAL state the user toggles (open/checked/selected -- the hybrid controlled/uncontrolled props above).",
       "- When a boolean state is INTERACTIVE (an accordion opening/closing, an expandable panel, a checkbox/switch/toggle, a selectable chip/tab), implement the STANDARD controlled/uncontrolled hybrid so the component both works on its own AND can be driven by a parent UI. Concretely, for a state called `open` (use the natural name -- `checked`, `selected`, `value`, etc.):",
       "    * `open?: boolean` -- OPTIONAL controlled value. When the parent passes it, it WINS: render from it and do not use internal state for display.",
       "    * `defaultOpen?: boolean` -- optional initial value for the uncontrolled case.",
