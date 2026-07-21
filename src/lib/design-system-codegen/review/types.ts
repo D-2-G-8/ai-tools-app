@@ -44,6 +44,11 @@ export interface ReviewContext {
    *  identifier (componentName). Empty / missing child ⇒ composition gate skips
    *  it (e.g. a child committed before contracts were persisted). */
   composedProps: Map<string, Map<string, PropDomain>>;
+  /** The exact composition imports this tsx is allowed to have: `path ->
+   *  importedName`, from the component's `uses` + its own kind (see
+   *  buildExpectedComposedImports). Any `../` import NOT in here is a broken /
+   *  hallucinated composition import (build-breaking). */
+  expectedComposedImports: Map<string, string>;
 }
 
 export interface ReviewResult {

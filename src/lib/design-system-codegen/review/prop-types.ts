@@ -74,6 +74,42 @@ export function buildComposedProps(
   return out;
 }
 
+/** Every parent-relative import in a component's tsx -> `{ importedName, path }`.
+ *  Only `../`-prefixed paths (composition of a sibling component/icon); a `./`
+ *  import (the component's own stylesheet) and bare module imports (react) are
+ *  excluded. Multiple specifiers on one line each yield an entry; `{ A as B }`
+ *  reports the EXPORTED name `A` (that's what the module must actually export). */
+export function parseCompositionImports(source: string): { importedName: string; path: string }[] {
+  const out: { importedName: string; path: string }[] = [];
+  for (const m of source.matchAll(/import\s*\{([^}]*)\}\s*from\s*["'](\.\.\/[^"']+)["']/g)) {
+    const path = m[2];
+    for (const spec of m[1].split(",")) {
+      const name = spec.trim().split(/\s+as\s+/)[0].trim();
+      if (name) out.push({ importedName: name, path });
+    }
+  }
+  return out;
+}
+
+/** The exact set of composition imports a component's tsx is ALLOWED to have,
+ *  as `path -> importedName`, derived from its `uses` and its own kind. Uses the
+ *  SAME path rule as generateTsx: a same-kind dependency is `../<slug>`, a
+ *  cross-kind one is `../../icons|components/<slug>`. Empty ⇒ the tsx may have no
+ *  `../` import at all. */
+export function buildExpectedComposedImports(
+  uses: { slug: string; componentName: string; isIcon: boolean }[] | undefined,
+  componentIsIcon: boolean,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!uses) return out;
+  for (const u of uses) {
+    const path =
+      u.isIcon === componentIsIcon ? `../${u.slug}` : `../../${u.isIcon ? "icons" : "components"}/${u.slug}`;
+    out.set(path, u.componentName);
+  }
+  return out;
+}
+
 /** Extract the `<tag ...>` attribute substring for each occurrence, brace-aware
  *  so a `>` inside `{...}` doesn't truncate the tag, and quote-aware so a `>`
  *  (or any bracket) inside a quoted attribute value (e.g. `aria-label="Home >

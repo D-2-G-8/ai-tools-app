@@ -5,7 +5,7 @@ import { getAnthropicClient } from "@/lib/llm/client";
 import { estimateCostUsd } from "@/lib/models";
 import type { DesignComponentVariant, DesignComponentState, StoredComponentContract } from "@/db/schema";
 import { toCssVarName, type TokenForCss } from "./tokens";
-import { buildOwnProps, buildComposedProps } from "./review/prop-types";
+import { buildOwnProps, buildComposedProps, buildExpectedComposedImports } from "./review/prop-types";
 
 // Re-exported so existing `from ".../component"` import sites (and this
 // module's own generateComponentCodeReviewed below) can use these pure
@@ -497,6 +497,13 @@ async function holisticFix(
             .filter(Boolean)
             .join("\n")}`
         : "",
+      component.uses && component.uses.length
+        ? `Composed components must be imported with EXACTLY these statements (copy verbatim -- correct path AND name; do NOT rename or shorten):\n${[
+            ...buildExpectedComposedImports(component.uses, component.isIcon),
+          ]
+            .map(([path, id]) => `- import { ${id} } from "${path}";`)
+            .join("\n")}`
+        : "",
       "",
       "Review findings you MUST fix ALL of:",
       findings.map((f) => `- [${f.file}] ${f.message}${f.suggestion ? ` (suggested: ${f.suggestion})` : ""}`).join("\n"),
@@ -627,6 +634,7 @@ export async function generateComponentCodeReviewed(
     tokenVarNames: new Set(availableTokens.map((t) => toCssVarName(t.name)).filter(Boolean)),
     ownProps: buildOwnProps(contract),
     composedProps: buildComposedProps(component.uses, childContracts),
+    expectedComposedImports: buildExpectedComposedImports(component.uses, component.isIcon),
   };
 
   const files: GeneratedFiles = {
