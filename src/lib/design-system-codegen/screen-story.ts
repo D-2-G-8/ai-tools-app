@@ -2,7 +2,7 @@ import "server-only";
 import { generateText } from "ai";
 import { getAnthropicClient } from "@/lib/llm/client";
 import { estimateCostUsd } from "@/lib/models";
-import { pascalCase } from "./component";
+import { pascalCase, componentIdentifier } from "./component";
 import type { DesignComponentVariant, DesignComponentState } from "@/db/schema";
 
 /**
@@ -42,7 +42,7 @@ export function screenSourcePaths(slug: string): ScreenSourcePaths {
 export function buildComponentCatalog(components: CatalogComponent[]): string {
   return components
     .map((c) => {
-      const cn = pascalCase(c.slug);
+      const cn = componentIdentifier(c.slug); // the exported identifier (valid even for digit-leading slugs)
       const dir = c.isIcon ? "icons" : "components";
       const variants = c.variants.map((v) => v.name).join(", ");
       const states = c.states.map((s) => s.name).join(", ");

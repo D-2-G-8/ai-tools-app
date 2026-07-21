@@ -1,6 +1,6 @@
 import "server-only";
 import { getFileNodes } from "@/lib/figma/client";
-import { pascalCase } from "./component";
+import { componentIdentifier } from "./component";
 import type { ComponentIndex, ComponentRef, FigmaNode, FigmaNodesResponse } from "./figma-node";
 
 /**
@@ -28,7 +28,7 @@ interface ComponentRow {
 export function buildComponentIndex(rows: ComponentRow[]): ComponentIndex {
   const index: ComponentIndex = new Map();
   for (const row of rows) {
-    const ref: ComponentRef = { slug: row.slug, componentName: pascalCase(row.slug), isIcon: row.isIcon };
+    const ref: ComponentRef = { slug: row.slug, componentName: componentIdentifier(row.slug), isIcon: row.isIcon };
     for (const nodeId of row.figmaNodeIds) {
       // First writer wins -- a node id belongs to exactly one component; if two
       // rows somehow claim it, prefer the earlier (stable) one.

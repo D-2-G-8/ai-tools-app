@@ -127,6 +127,22 @@ export function pascalCase(slug: string): string {
     .join("");
 }
 
+/**
+ * A VALID JS/React identifier for a slug. pascalCase alone can start with a
+ * digit (slug "24-outline-orders" -> "24OutlineOrders"), which is a legal
+ * FILENAME but an ILLEGAL identifier -- it breaks `export const`, `interface`,
+ * and every `import { ... }` of it (confirmed: a "24-outline-orders" icon that
+ * an accordion composed broke the whole design-system build). Prefix an "N" in
+ * that case. A LETTER (not "_") so the Storybook story id derived from it stays
+ * a plain lowercase of the same string. File paths keep pascalCase (valid as a
+ * path), so identifier and filename can differ only for digit-leading slugs --
+ * and regeneration then fixes files in place rather than orphaning renamed ones.
+ */
+export function componentIdentifier(slug: string): string {
+  const name = pascalCase(slug);
+  return /^[0-9]/.test(name) ? `N${name}` : name;
+}
+
 export interface ComponentSourcePaths {
   dir: string;
   componentName: string;
@@ -220,6 +236,7 @@ async function generateTsx(
   component: ComponentForCodegen,
   contract: ComponentContract,
   componentName: string,
+  fileBase: string,
 ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
   const anthropic = await getAnthropicClient();
   const result = await generateText({
@@ -232,7 +249,7 @@ async function generateTsx(
       "",
       `Component name: ${componentName}`,
       `Props:\n${contract.props.map((p) => `- ${p.name}: ${p.type}${p.description ? ` -- ${p.description}` : ""}`).join("\n")}`,
-      `CSS Modules class names available (import from "./${componentName}.module.scss" as \`styles\`, reference ONLY via styles.<name>, exactly these names): ${contract.classNames.join(", ")}`,
+      `CSS Modules class names available (import from "./${fileBase}.module.scss" as \`styles\`, reference ONLY via styles.<name>, exactly these names): ${contract.classNames.join(", ")}`,
       component.uses && component.uses.length > 0
         ? "\nThis component COMPOSES other design-system components -- the design spec marks their spots as " +
           "`USE <Name>`. For each, IMPORT it from its sibling module and RENDER it there; do NOT re-implement its " +
@@ -296,6 +313,7 @@ async function generateStories(
   component: ComponentForCodegen,
   contract: ComponentContract,
   componentName: string,
+  fileBase: string,
 ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
   // Icons get their own "Icons/" Storybook section (mirrors the src/icons/
   // folder split and the app's separate Icons tab); everything else is a
@@ -311,7 +329,7 @@ async function generateStories(
     prompt: [
       describeComponent(component),
       "",
-      `Component: ${componentName}, imported from "./${componentName}" (a barrel that re-exports it).`,
+      `Component: ${componentName}, imported from "./${fileBase}" (a barrel that re-exports it).`,
       `Props:\n${contract.props.map((p) => `- ${p.name}: ${p.type}`).join("\n")}`,
       "",
       "Follow this exact structure (adjust component/args/stories to this component, but keep `title` and " +
@@ -346,7 +364,7 @@ async function generateStories(
         "values from the prop types above (e.g. if `size: \"24\" | \"32\"`, the control options are \"24\"/\"32\", " +
         "never invented ones like \"sm\"/\"md\").",
       "",
-      `ALWAYS import the component under the alias "Component", exactly as shown above (\`import { ${componentName} as Component } from "./${componentName}"\`) -- ` +
+      `ALWAYS import the component under the alias "Component", exactly as shown above (\`import { ${componentName} as Component } from "./${fileBase}"\`) -- ` +
         "never under its own bare name. A story is always exported as `Default`, and some components may also " +
         `end up with a variant/state story that happens to share the component's own name (e.g. a component ` +
         'called "Default" or "Primary") -- importing the component bare in that case declares two top-level ' +
@@ -484,13 +502,14 @@ export async function generateComponentCode(
   // component detail page's Storybook iframe link needs (see
   // src/app/(protected)/design-system/components/[slug]/page.tsx).
   const paths = componentSourcePaths(component.slug, component.isIcon);
-  const componentName = paths.componentName;
+  const fileBase = paths.componentName; // the file name (may start with a digit -- valid as a path)
+  const componentName = componentIdentifier(component.slug); // the JS identifier (never starts with a digit)
   const { contract, inputTokens: t1, outputTokens: o1 } = await generateContract(model, component, availableTokens);
 
   const [tsx, css, stories] = await Promise.all([
-    generateTsx(model, component, contract, componentName),
+    generateTsx(model, component, contract, componentName, fileBase),
     generateCss(model, component, contract, availableTokens),
-    generateStories(model, component, contract, componentName),
+    generateStories(model, component, contract, componentName, fileBase),
   ]);
 
   const check = checkClassNamesMatch(tsx.content, css.content);
@@ -518,7 +537,7 @@ export async function generateComponentCode(
     storiesPath: paths.storiesPath,
     storiesContent: stories.content,
     indexPath: paths.indexPath,
-    indexContent: `export { ${componentName} } from "./${componentName}";\nexport type { ${componentName}Props } from "./${componentName}";\n`,
+    indexContent: `export { ${componentName} } from "./${fileBase}";\nexport type { ${componentName}Props } from "./${fileBase}";\n`,
     inputTokens,
     outputTokens,
     costUsd: estimateCostUsd(model, inputTokens, outputTokens),
@@ -545,6 +564,7 @@ export async function generateComponentCode(
  * iframe (see DESIGN_SYSTEM_STORYBOOK_URL in .env.example).
  */
 export function storybookDefaultStoryId(slug: string, isIcon: boolean): string {
-  const sanitizedComponentName = pascalCase(slug).toLowerCase();
+  // Same identifier the story's title uses (componentIdentifier), lowercased.
+  const sanitizedComponentName = componentIdentifier(slug).toLowerCase();
   return `${isIcon ? "icons" : "components"}-${sanitizedComponentName}--default`;
 }
