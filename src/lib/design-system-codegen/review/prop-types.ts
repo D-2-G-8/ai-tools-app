@@ -152,29 +152,48 @@ export function parseJsxLiteralProps(source: string, tag: string): ParsedProp[] 
 
 /** Mask every depth-aware `{...}`, `[...]`, and `(...)` group in `s` with
  *  spaces of equal length, leaving everything else (and the overall string
- *  length/positions) untouched. Used so the top-level `name: value` pair
- *  regex never re-scans the inside of a nested object/array/call value as if
- *  it were more top-level pairs. */
+ *  length/positions) untouched. Quote-aware like `maskBracesAndStrings`: a
+ *  `"..."`/`'...'` run at depth 0 is copied verbatim (not masked) so a
+ *  top-level string arg value survives for the `name: value` regex, and any
+ *  `(`/`[`/`{` characters inside it never perturb depth tracking -- without
+ *  this, a string like `"Click (here) to continue"` would be misread as
+ *  opening a nested group. Used so the top-level `name: value` pair regex
+ *  never re-scans the inside of a nested object/array/call value as if it
+ *  were more top-level pairs. */
 function maskNestedGroups(s: string): string {
   let out = "";
   let depth = 0;
-  for (let i = 0; i < s.length; i++) {
+  let i = 0;
+  while (i < s.length) {
     const c = s[i];
+    if (depth === 0 && (c === '"' || c === "'")) {
+      const quote = c;
+      let j = i + 1;
+      while (j < s.length && s[j] !== quote) j++;
+      const end = j < s.length ? j + 1 : j; // include closing quote if present
+      out += s.slice(i, end); // copy verbatim -- preserve the string value
+      i = end;
+      continue;
+    }
     if (c === "{" || c === "[" || c === "(") {
       depth++;
       out += " ";
+      i++;
       continue;
     }
     if (c === "}" || c === "]" || c === ")") {
       depth = Math.max(0, depth - 1);
       out += " ";
+      i++;
       continue;
     }
     if (depth > 0) {
       out += " ";
+      i++;
       continue;
     }
     out += c;
+    i++;
   }
   return out;
 }
