@@ -138,7 +138,8 @@ export function runDeterministicGates(files: GeneratedFiles, ctx: ReviewContext)
  *  React). Everything else is returned unchanged for the LLM autofix. Safe to
  *  call repeatedly. */
 export function applyDeterministicFixes(files: GeneratedFiles, findings: Finding[]): GeneratedFiles {
-  let { tsx, css, stories, index } = files;
+  let { tsx, stories } = files;
+  const { css, index } = files;
   const ids = new Set(findings.map((f) => f.id));
 
   if (ids.has("stories-self-import-case") || ids.has("stories-self-import-missing")) {
