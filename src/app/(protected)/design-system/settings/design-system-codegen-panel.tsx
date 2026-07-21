@@ -10,7 +10,7 @@ export interface CodegenComponentSummary {
   codeSyncStatus: string;
 }
 
-type ComponentStatus = "waiting" | "running" | "done" | "error";
+type ComponentStatus = "waiting" | "running" | "done" | "error" | "blocked";
 type RunMode = "idle" | "all" | "failed";
 
 interface ComponentLine {
@@ -48,6 +48,7 @@ export function DesignSystemCodegenPanel({ components }: { components: CodegenCo
   const [lines, setLines] = useState<ComponentLine[]>([]);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [prUrl, setPrUrl] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
 
   // Components whose LAST generation attempt errored (see the codegen
   // route's catch block, which sets codeSyncStatus: "failed" and never
@@ -73,9 +74,27 @@ export function DesignSystemCodegenPanel({ components }: { components: CodegenCo
         // only after the components it composes -- and generate one full level
         // (in parallel) before the next, so those imports point at committed code.
         const bySlug = new Map(items.map((c) => [c.slug, c]));
-        const { levels } = await computeCodegenPlan(items.map((c) => c.slug));
+        const { levels, edges } = await computeCodegenPlan(items.map((c) => c.slug));
+
+        // A component whose dependency failed (or was itself blocked by a failed
+        // dependency) isn't worth generating -- its composition imports would
+        // point at code that never landed. Skip it WITHOUT calling the route
+        // (saves an LLM run) and propagate the block to its dependents. The
+        // level barrier below guarantees a dependency's result is known before
+        // its dependents' level runs.
+        const failed = new Set<string>();
+        const blocked = new Set<string>();
 
         const runOne = async (component: CodegenComponentSummary) => {
+          const deps = edges[component.slug] ?? [];
+          const blocker = deps.find((d) => failed.has(d) || blocked.has(d));
+          if (blocker) {
+            blocked.add(component.slug);
+            setLines((prev) =>
+              prev.map((l) => (l.slug === component.slug ? { ...l, status: "blocked", message: `dependency "${blocker}" not built` } : l)),
+            );
+            return;
+          }
           setLines((prev) => prev.map((l) => (l.slug === component.slug ? { ...l, status: "running" } : l)));
           try {
             const res = await fetch(`/api/design-system/codegen/${encodeURIComponent(component.slug)}?branch=${encodeURIComponent(branchName)}`, {
@@ -83,6 +102,7 @@ export function DesignSystemCodegenPanel({ components }: { components: CodegenCo
             });
             const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; componentName?: string };
             if (!res.ok || !body.ok) {
+              failed.add(component.slug);
               setLines((prev) =>
                 prev.map((l) => (l.slug === component.slug ? { ...l, status: "error", message: body.error ?? `HTTP ${res.status}` } : l)),
               );
@@ -93,6 +113,7 @@ export function DesignSystemCodegenPanel({ components }: { components: CodegenCo
             );
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
+            failed.add(component.slug);
             setLines((prev) => prev.map((l) => (l.slug === component.slug ? { ...l, status: "error", message } : l)));
           }
         };
@@ -115,20 +136,39 @@ export function DesignSystemCodegenPanel({ components }: { components: CodegenCo
     [running, router],
   );
 
-  const start = useCallback(() => runComponents(components, "all"), [runComponents, components]);
-  const retryFailed = useCallback(() => runComponents(failedComponents, "failed"), [runComponents, failedComponents]);
+  // Default run skips already-built (committed) components -- they exist, so
+  // regenerating them just burns tokens. Only "never"/"failed" get generated.
+  // (A Figma-changed component still marked "committed" is skipped too;
+  // per-component "Resync" or "Retry failed" rebuilds it -- change-detection is
+  // a later feature.)
+  const start = useCallback(() => {
+    const toBuild = components.filter((c) => c.codeSyncStatus !== "committed");
+    const alreadyBuilt = components.length - toBuild.length;
+    if (toBuild.length === 0) {
+      setNote('All components are already built -- nothing to regenerate. Use "Retry failed only" or resync from Figma to rebuild.');
+      return;
+    }
+    setNote(alreadyBuilt > 0 ? `${alreadyBuilt} already-built component(s) skipped -- generating ${toBuild.length} new/failed.` : null);
+    runComponents(toBuild, "all");
+  }, [runComponents, components]);
+  const retryFailed = useCallback(() => {
+    setNote(null);
+    runComponents(failedComponents, "failed");
+  }, [runComponents, failedComponents]);
 
   const statusLabel: Record<ComponentStatus, string> = {
     waiting: "queued",
     running: "generating...",
     done: "done",
     error: "failed",
+    blocked: "blocked",
   };
   const statusClass: Record<ComponentStatus, string> = {
     waiting: "text-neutral-400",
     running: "text-neutral-600",
     done: "text-emerald-600",
     error: "text-red-600",
+    blocked: "text-amber-600",
   };
 
   return (
@@ -165,13 +205,14 @@ export function DesignSystemCodegenPanel({ components }: { components: CodegenCo
               <span className="text-neutral-700">{line.name}</span>
               <span className={statusClass[line.status]}>
                 {statusLabel[line.status]}
-                {line.status === "error" && line.message ? `: ${line.message}` : ""}
+                {(line.status === "error" || line.status === "blocked") && line.message ? `: ${line.message}` : ""}
               </span>
             </div>
           ))}
         </div>
       )}
 
+      {note && <p className="rounded-md bg-neutral-100 px-3 py-2 text-xs text-neutral-600">{note}</p>}
       {sessionError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{sessionError}</p>}
       {prUrl && (
         <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
