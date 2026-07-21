@@ -97,7 +97,7 @@ function round(n: number): number {
 }
 
 /** {r,g,b,a} in 0..1 -> "#rrggbb" (or "rgba(...)" when translucent). */
-function colorToCss(c: FigmaColor): string {
+export function colorToCss(c: FigmaColor): string {
   const to255 = (v: number) => Math.round(v * 255);
   const a = c.a ?? 1;
   if (a < 1) return `rgba(${to255(c.r)}, ${to255(c.g)}, ${to255(c.b)}, ${round(a)})`;
@@ -106,7 +106,7 @@ function colorToCss(c: FigmaColor): string {
 }
 
 /** First visible solid fill of a node, as a CSS color string, or null. */
-function solidFill(paints: FigmaPaint[] | undefined): string | null {
+export function solidFill(paints: FigmaPaint[] | undefined): string | null {
   const p = (paints ?? []).find((x) => x.type === "SOLID" && x.visible !== false && x.color);
   return p?.color ? colorToCss(p.color) : null;
 }
@@ -122,7 +122,7 @@ function withToken(color: string, tokenByValue: Map<string, string>): string {
   return name ? `${color} (token --${name})` : color;
 }
 
-function radiusOf(node: FigmaNode): string | null {
+export function radiusOf(node: FigmaNode): string | null {
   if (typeof node.cornerRadius === "number" && node.cornerRadius > 0) return `${round(node.cornerRadius)}px`;
   const r = node.rectangleCornerRadii;
   if (r && r.some((v) => v > 0)) return r.map(round).join("/") + "px";
@@ -175,7 +175,7 @@ function distillNode(
   if (box) parts.push(`${round(box.width)}x${round(box.height)}`);
 
   const radius = radiusOf(node);
-  if (radius) parts.push(`radius:${radius}`);
+  if (radius) parts.push(`radius:${withToken(radius, tokenByValue)}`);
 
   if (node.layoutMode && node.layoutMode !== "NONE") {
     const pad = [node.paddingTop, node.paddingRight, node.paddingBottom, node.paddingLeft];

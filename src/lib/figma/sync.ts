@@ -2,7 +2,8 @@ import "server-only";
 import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { designToken, designComponent, type DesignTokenCategory, type DesignComponentVariant, type DesignComponentState } from "@/db/schema";
-import { figmaGet, FIGMA_FILE_FETCH_TIMEOUT_MS } from "./client";
+import { figmaGet, FIGMA_FILE_FETCH_TIMEOUT_MS, describeFigmaError } from "./client";
+import { deriveTokensFromComponents } from "@/lib/design-system-codegen/token-derive";
 
 /**
  * Pulls a Figma file's styles and components and upserts them into
@@ -679,8 +680,18 @@ async function tryFastSync(
   onProgress: OnSyncProgress,
 ): Promise<SyncResult | null> {
   const key = encodeURIComponent(fileKey);
+  // A caught (null) styles response is ambiguous: it means EITHER "no styles" OR
+  // "the styles endpoint errored" (e.g. a 403 on a token without the right
+  // scope). Logging the error keeps a silent-empty token result from hiding a
+  // real permission problem -- the failure mode that let an empty tokens.css
+  // ship unnoticed. (Modern files also keep tokens as Figma Variables, not
+  // Styles, which this endpoint never returns -- see deriveTokensFromComponents.)
+  const onStylesError = (err: unknown) => {
+    console.warn(`[figma-sync] styles fetch failed for ${fileKey} (continuing without style tokens): ${describeFigmaError(err)}`);
+    return null;
+  };
   const [stylesRes, componentsRes, setsRes] = await Promise.all([
-    figmaGet<FigmaFileStylesResponse>(`/files/${key}/styles`, accessToken).catch(() => null),
+    figmaGet<FigmaFileStylesResponse>(`/files/${key}/styles`, accessToken).catch(onStylesError),
     figmaGet<FigmaFileComponentsResponse>(`/files/${key}/components`, accessToken).catch(() => null),
     figmaGet<FigmaFileComponentSetsResponse>(`/files/${key}/component_sets`, accessToken).catch(() => null),
   ]);
@@ -771,8 +782,29 @@ export async function syncDesignSystemFromFigma(
   onProgress: OnSyncProgress = () => {},
 ): Promise<SyncResult> {
   const fast = await tryFastSync(workspaceId, fileKey, accessToken, onProgress);
-  if (fast) return fast;
-  return syncViaFullFileWalk(workspaceId, fileKey, accessToken, onProgress);
+  const result = fast ?? (await syncViaFullFileWalk(workspaceId, fileKey, accessToken, onProgress));
+
+  // Modern Figma files keep tokens as Variables (Enterprise-only API/scope), so
+  // the Styles-based passes above often find NONE -- which shipped an empty
+  // tokens.css and made every generated component hardcode its colors. Recover
+  // real tokens by harvesting the colors/radii the components actually use (see
+  // deriveTokensFromComponents). Runs after components are upserted (it reads
+  // their node ids from the DB) and is best-effort: a failure here augments,
+  // never breaks, the metadata sync.
+  try {
+    const derived = await deriveTokensFromComponents(workspaceId, fileKey, accessToken);
+    result.tokensUpserted += derived.colors + derived.radii;
+    if (derived.colors + derived.radii > 0) {
+      onProgress({
+        phase: "tokens",
+        message: `Derived ${derived.colors} color + ${derived.radii} radius token(s) from component usage.`,
+      });
+    }
+  } catch (err) {
+    console.warn(`[figma-sync] token derivation from components failed (kept style tokens only): ${describeFigmaError(err)}`);
+  }
+
+  return result;
 }
 
 // ---- Targeted resync: single component ----

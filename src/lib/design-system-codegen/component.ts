@@ -5,6 +5,26 @@ import { getAnthropicClient } from "@/lib/llm/client";
 import { estimateCostUsd } from "@/lib/models";
 import type { DesignComponentVariant, DesignComponentState } from "@/db/schema";
 import { toCssVarName, type TokenForCss } from "./tokens";
+import {
+  pascalCase,
+  componentIdentifier,
+  componentSourcePaths,
+  storybookDefaultStoryId,
+  type ComponentSourcePaths,
+  type GeneratedComponentFiles,
+} from "./paths";
+
+// Re-exported so existing `from ".../component"` import sites keep working after
+// these pure helpers moved to ./paths (which has no server-only, so icon.ts and
+// unit tests can use them without dragging in this module's LLM/db imports).
+export {
+  pascalCase,
+  componentIdentifier,
+  componentSourcePaths,
+  storybookDefaultStoryId,
+  type ComponentSourcePaths,
+  type GeneratedComponentFiles,
+};
 
 /**
  * Turns one design_component row (+ the workspace's currently-synced
@@ -70,27 +90,6 @@ export interface ComponentForCodegen {
   uses?: { slug: string; componentName: string; isIcon: boolean }[];
 }
 
-export interface GeneratedComponentFiles {
-  componentName: string;
-  /** Paths relative to the design-system repo root. */
-  tsxPath: string;
-  tsxContent: string;
-  cssPath: string;
-  cssContent: string;
-  storiesPath: string;
-  storiesContent: string;
-  indexPath: string;
-  indexContent: string;
-  /** Stale files to delete in the same commit -- e.g. a digit-leading slug that
-   *  previously filed under its (invalid-identifier) pascalCase name and now
-   *  files under the "N"-prefixed one; removing the old ones avoids orphaned
-   *  duplicate files/stories breaking the build. Empty in the common case. */
-  deletePaths: string[];
-  inputTokens: number;
-  outputTokens: number;
-  costUsd: number;
-}
-
 const contractSchema = z.object({
   props: z
     .array(
@@ -123,68 +122,6 @@ const contractSchema = z.object({
 });
 
 type ComponentContract = z.infer<typeof contractSchema>;
-
-export function pascalCase(slug: string): string {
-  return slug
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join("");
-}
-
-/**
- * A VALID JS/React identifier for a slug. pascalCase alone can start with a
- * digit (slug "24-outline-orders" -> "24OutlineOrders"), which is a legal
- * FILENAME but an ILLEGAL identifier -- it breaks `export const`, `interface`,
- * and every `import { ... }` of it (confirmed: a "24-outline-orders" icon that
- * an accordion composed broke the whole design-system build). Prefix an "N" in
- * that case. A LETTER (not "_") so the Storybook story id derived from it stays
- * a plain lowercase of the same string. File paths keep pascalCase (valid as a
- * path), so identifier and filename can differ only for digit-leading slugs --
- * and regeneration then fixes files in place rather than orphaning renamed ones.
- */
-export function componentIdentifier(slug: string): string {
-  const name = pascalCase(slug);
-  return /^[0-9]/.test(name) ? `N${name}` : name;
-}
-
-export interface ComponentSourcePaths {
-  dir: string;
-  componentName: string;
-  tsxPath: string;
-  cssPath: string;
-  storiesPath: string;
-  indexPath: string;
-}
-
-/**
- * The exact repo-relative paths a component's generated files live at,
- * derived purely from its slug (same pascalCase(slug) generateComponentCode
- * uses) and its isIcon flag. Single source of truth for both writing those
- * paths (below) and deleting them (design-system/components/actions.ts,
- * settings/cleanup-actions.ts's "remove code-synced component(s)" flow) --
- * so a rename of this convention can't silently desync the two.
- *
- * Icons (isIcon) live under `src/icons/<slug>/`, everything else under
- * `src/components/<slug>/`. Callers MUST pass the component's own isIcon so
- * writes and deletes always target the same folder.
- */
-export function componentSourcePaths(slug: string, isIcon: boolean): ComponentSourcePaths {
-  // File name == the exported identifier, so imports never have to juggle two
-  // different names (a digit-leading slug files as "N24OutlineOrders.tsx", not
-  // "24OutlineOrders.tsx" -- keeps every self/story/composition import a single
-  // consistent name the model can't get wrong).
-  const componentName = componentIdentifier(slug);
-  const dir = `src/${isIcon ? "icons" : "components"}/${slug}`;
-  return {
-    dir,
-    componentName,
-    tsxPath: `${dir}/${componentName}.tsx`,
-    cssPath: `${dir}/${componentName}.module.scss`,
-    storiesPath: `${dir}/${componentName}.stories.tsx`,
-    indexPath: `${dir}/index.ts`,
-  };
-}
 
 function describeComponent(component: ComponentForCodegen): string {
   const variantLines = component.variants.map((v) => `- ${v.name}${v.description ? ` -- ${v.description}` : ""}`);
@@ -283,6 +220,8 @@ async function generateTsx(
       "- If an \"Actual Figma design\" block is given above, reproduce its DOM structure and per-variant behavior faithfully (the same nesting of container/content/badge elements, the same size/type/state branching) -- don't invent a different structure.",
       "- Extend the appropriate native HTML element attributes type where sensible (e.g. ButtonHTMLAttributes for a button).",
       "- Reference styles ONLY via styles.<name>, copying each class name from the list above character-for-character (they are camelCase, so always dot access `styles.foo` -- never `styles['a-b']`, never a name not in the list). Never invent a class, never use inline styles, never hardcode a color/size value.",
+      "- Apply any state-driven visual transform (e.g. rotating a chevron when `opened`, flipping an arrow) in EXACTLY ONE place -- either a CSS class toggled here OR an inline transform, NEVER both. Doing it in both an inline `style={{ transform: ... }}` AND a CSS rule compounds the two (180deg + 180deg = 360deg) so the element visibly doesn't move at all. Prefer toggling a CSS class and let the stylesheet own the transform.",
+      "- If a section only renders when a boolean prop is true (e.g. `{opened && <div className={styles.body}>...}`), a CSS open/close TRANSITION on that element is dead code (it mounts already-open). Either always render it and toggle an `open` class, or don't write a transition for it.",
       "- No default export.",
     ].join("\n"),
   });
@@ -573,29 +512,4 @@ export async function generateComponentCode(
     outputTokens,
     costUsd: estimateCostUsd(model, inputTokens, outputTokens),
   };
-}
-
-/**
- * The Storybook story id ("components-<name>--default") this module's
- * generated .stories.tsx always uses for its canonical "Default" story --
- * see generateStories's REQUIRED title/Default-story instructions above,
- * which force `title: "Components/${componentName}"` (componentName =
- * pascalCase(slug), computed the same way generateComponentCode does) and
- * a story exported as exactly `Default`.
- *
- * Storybook derives a story id by lowercasing each "/"-separated title
- * segment and stripping everything outside [a-z0-9-_], then joining with
- * "-" and appending "--" + the sanitized story export name. Since
- * componentName is PascalCase with no separators to strip (only case),
- * sanitizing it is equivalent to just lowercasing component.slug with its
- * own hyphens/underscores removed -- so this is derivable from
- * component.slug (+ its isIcon flag, which picks the "icons"/"components"
- * title prefix generateStories uses) alone, with no need to inspect any
- * generated file. Used by the component detail page to embed a Storybook
- * iframe (see DESIGN_SYSTEM_STORYBOOK_URL in .env.example).
- */
-export function storybookDefaultStoryId(slug: string, isIcon: boolean): string {
-  // Same identifier the story's title uses (componentIdentifier), lowercased.
-  const sanitizedComponentName = componentIdentifier(slug).toLowerCase();
-  return `${isIcon ? "icons" : "components"}-${sanitizedComponentName}--default`;
 }
