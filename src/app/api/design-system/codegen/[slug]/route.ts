@@ -6,7 +6,8 @@ import { db } from "@/db";
 import { workspace, designComponent, run as runTable } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getEffectiveModel } from "@/lib/tools/model-settings";
-import { generateComponentCode, type ComponentForCodegen } from "@/lib/design-system-codegen/component";
+import { generateComponentCodeReviewed, type ComponentForCodegen } from "@/lib/design-system-codegen/component";
+import type { Finding } from "@/lib/design-system-codegen/review";
 import type { GeneratedComponentFiles } from "@/lib/design-system-codegen/paths";
 import { buildIconComponentFiles } from "@/lib/design-system-codegen/icon";
 import { fetchIconSvg } from "@/lib/design-system-codegen/icon-fetch";
@@ -79,6 +80,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     const figmaToken = ws.figmaFileKey ? await getValidFigmaAccessToken() : null;
 
     let generated: GeneratedComponentFiles;
+    let reviewFindings: Finding[] = []; // populated by the reviewed LLM path; empty for icons
 
     // Icons are generated DETERMINISTICALLY from their real Figma SVG (no LLM):
     // the distilled text spec the LLM pipeline uses carries no vector geometry,
@@ -146,7 +148,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
         designSpec,
         uses,
       };
-      generated = await generateComponentCode(model, forCodegen, tokens);
+      const reviewed = await generateComponentCodeReviewed(model, forCodegen, tokens);
+      generated = reviewed;
+      reviewFindings = reviewed.reviewFindings;
+      if (!reviewed.reviewPassed) {
+        // A build-breaking finding survived the autofix loop -- do NOT commit a
+        // broken build. Mark failed and surface the findings.
+        await db.update(designComponent).set({ codeSyncStatus: "failed" }).where(eq(designComponent.id, component.id));
+        const summary = reviewed.reviewFindings.map((f) => `[${f.severity}] ${f.file}: ${f.message}`).join("; ");
+        return NextResponse.json(
+          { ok: false, error: `Review did not pass after autofix: ${summary}`.slice(0, 2000) },
+          { status: 422 },
+        );
+      }
     }
 
     // Only delete legacy files that actually exist on the branch -- the Git
@@ -185,7 +199,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       userId: currentUser.id,
       status: "completed",
       inputSummary: `Generate ${component.name}`.slice(0, 500),
-      outputSummary: `Committed ${generated.componentName} (${sha.slice(0, 7)})`.slice(0, 500),
+      outputSummary: `Committed ${generated.componentName} (${sha.slice(0, 7)})${
+        reviewFindings.length ? ` -- ${reviewFindings.length} residual review note(s)` : ""
+      }`.slice(0, 500),
       inputTokens: generated.inputTokens,
       outputTokens: generated.outputTokens,
       costEstimateUsd: generated.costUsd.toFixed(6),
@@ -196,7 +212,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     await db.update(designComponent).set({ codeSyncStatus: "failed" }).where(eq(designComponent.id, component.id));
     const message = err instanceof Error ? err.message : String(err);
 
-    // No token counts here -- generateComponentCode throws before returning
+    // No token counts here -- generateComponentCodeReviewed throws before returning
     // anything on failure, same as every other tool's error-path run row
     // (e.g. documents/format-actions.ts), which also has no partial usage
     // to record.
