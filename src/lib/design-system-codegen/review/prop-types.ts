@@ -48,6 +48,34 @@ export function parsePropType(type: string): PropDomain {
   return { kind: "open" };
 }
 
+/** This component's own props -> value domain, for the self gate. Typed
+ *  structurally (not `StoredComponentContract` from @/db/schema) so this
+ *  module keeps no server-only-adjacent imports and stays importable under
+ *  plain tsx/node for fixture tests, like the rest of this file. */
+export function buildOwnProps(contract: { props: { name: string; type: string }[] }): Map<string, PropDomain> {
+  const m = new Map<string, PropDomain>();
+  for (const p of contract.props) m.set(p.name, parsePropType(p.type));
+  return m;
+}
+
+/** Composed children's prop domains, keyed by JSX identifier (componentName).
+ *  Skips any `uses` entry whose child has no stored contract. */
+export function buildComposedProps(
+  uses: { slug: string; componentName: string; isIcon: boolean }[] | undefined,
+  childContracts: Map<string, { props: { name: string; type: string }[] }> | undefined,
+): Map<string, Map<string, PropDomain>> {
+  const out = new Map<string, Map<string, PropDomain>>();
+  if (!uses || !childContracts) return out;
+  for (const u of uses) {
+    const c = childContracts.get(u.slug);
+    if (!c) continue;
+    const pm = new Map<string, PropDomain>();
+    for (const p of c.props) pm.set(p.name, parsePropType(p.type));
+    out.set(u.componentName, pm);
+  }
+  return out;
+}
+
 /** Extract the `<tag ...>` attribute substring for each occurrence, brace-aware
  *  so a `>` inside `{...}` doesn't truncate the tag. */
 function tagAttrChunks(source: string, tag: string): string[] {

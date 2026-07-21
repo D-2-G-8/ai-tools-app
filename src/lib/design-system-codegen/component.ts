@@ -3,8 +3,17 @@ import { generateObject, generateText } from "ai";
 import { z } from "zod";
 import { getAnthropicClient } from "@/lib/llm/client";
 import { estimateCostUsd } from "@/lib/models";
-import type { DesignComponentVariant, DesignComponentState } from "@/db/schema";
+import type { DesignComponentVariant, DesignComponentState, StoredComponentContract } from "@/db/schema";
 import { toCssVarName, type TokenForCss } from "./tokens";
+import { parsePropType, type PropDomain, buildOwnProps, buildComposedProps } from "./review/prop-types";
+
+// Re-exported so existing `from ".../component"` import sites (and this
+// module's own generateComponentCodeReviewed below) can use these pure
+// map builders. They live in ./review/prop-types (no server-only) rather
+// than here so fixture tests can import them under plain tsx/node --
+// this module starts with `import "server-only"`, which throws when
+// required outside a Next.js server context (e.g. under `tsx` directly).
+export { buildOwnProps, buildComposedProps };
 import {
   pascalCase,
   componentIdentifier,
@@ -158,6 +167,9 @@ const contractSchema = z.object({
 
 type ComponentContract = z.infer<typeof contractSchema>;
 
+/** The subset of a component's persisted contract a DEPENDENT needs. */
+export type ChildContract = StoredComponentContract;
+
 function describeComponent(component: ComponentForCodegen): string {
   const variantLines = component.variants.map((v) => `- ${v.name}${v.description ? ` -- ${v.description}` : ""}`);
   const stateLines = component.states.map((s) => `- ${s.name}${s.description ? ` -- ${s.description}` : ""}`);
@@ -218,6 +230,7 @@ async function generateTsx(
   contract: ComponentContract,
   componentName: string,
   fileBase: string,
+  childContracts?: Map<string, ChildContract>,
   reviewFeedback?: string,
 ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
   const anthropic = await getAnthropicClient();
@@ -245,7 +258,11 @@ async function generateTsx(
                 u.isIcon === component.isIcon
                   ? `../${u.slug}`
                   : `../../${u.isIcon ? "icons" : "components"}/${u.slug}`;
-              return `- import { ${u.componentName} } from "${path}";`;
+              const c = childContracts?.get(u.slug);
+              const api = c
+                ? `\n    ${u.componentName} props (use ONLY these exact values): ${c.props.map((p) => `${p.name}: ${p.type}`).join("; ")}`
+                : "";
+              return `- import { ${u.componentName} } from "${path}";${api}`;
             })
             .join("\n") +
           "\nPass the instance's props(...) from the spec through to the component's props as sensible. " +
@@ -259,7 +276,10 @@ async function generateTsx(
           "Square=Off)`). These are NOT the composed component's actual prop values -- convert them: design-system " +
           "enum values are lowercase without units (`appearance=\"negative\"`, `size=\"32\"`), and On/Off booleans are " +
           "real booleans (`square={false}`). Passing a capitalized label (`appearance=\"Negative\"`) or a unit string " +
-          "(`size=\"32 px\"`) is a TYPE ERROR that fails the build."
+          "(`size=\"32 px\"`) is a TYPE ERROR that fails the build." +
+          " Map each Figma label to the child's ACTUAL prop value from its listed prop API above -- match names and " +
+          "values EXACTLY (case, units). If a label has no matching value in that API, pick the closest valid one; " +
+          "never invent a value outside the listed type."
         : "",
       "",
       "Requirements:",
@@ -454,6 +474,7 @@ async function holisticFix(
   files: GeneratedFiles,
   findings: { file: string; message: string; suggestion?: string }[],
   componentName: string,
+  childContracts?: Map<string, ChildContract>,
 ): Promise<{ files: GeneratedFiles; inputTokens: number; outputTokens: number }> {
   const anthropic = await getAnthropicClient();
   const result = await generateText({
@@ -467,6 +488,15 @@ async function holisticFix(
       "",
       `Component name: ${componentName}. CSS Modules class names (use these EXACT names, styles.<name>): ${contract.classNames.join(", ")}`,
       `Props: ${contract.props.map((p) => `${p.name}: ${p.type}`).join("; ")}`,
+      component.uses && component.uses.length
+        ? `Composed children's prop APIs (pass ONLY these exact values -- match case/units):\n${component.uses
+            .map((u) => {
+              const c = childContracts?.get(u.slug);
+              return c ? `- ${u.componentName}: ${c.props.map((p) => `${p.name}: ${p.type}`).join("; ")}` : "";
+            })
+            .filter(Boolean)
+            .join("\n")}`
+        : "",
       "",
       "Review findings you MUST fix ALL of:",
       findings.map((f) => `- [${f.file}] ${f.message}${f.suggestion ? ` (suggested: ${f.suggestion})` : ""}`).join("\n"),
@@ -508,6 +538,7 @@ export async function generateComponentCode(
   model: string,
   component: ComponentForCodegen,
   availableTokens: TokenForCss[],
+  childContracts?: Map<string, ChildContract>,
 ): Promise<GeneratedComponentFiles & { contract: ComponentContract }> {
   // Computed from the slug rather than asked of the LLM (the contract
   // schema used to have a `componentName` field) -- this makes the
@@ -521,7 +552,7 @@ export async function generateComponentCode(
   const { contract, inputTokens: t1, outputTokens: o1 } = await generateContract(model, component, availableTokens);
 
   const [tsx, css, stories] = await Promise.all([
-    generateTsx(model, component, contract, componentName, fileBase),
+    generateTsx(model, component, contract, componentName, fileBase, childContracts),
     generateCss(model, component, contract, availableTokens),
     generateStories(model, component, contract, componentName, fileBase),
   ]);
@@ -581,8 +612,9 @@ export async function generateComponentCodeReviewed(
   model: string,
   component: ComponentForCodegen,
   availableTokens: TokenForCss[],
-): Promise<GeneratedComponentFiles & { reviewFindings: Finding[]; reviewPassed: boolean }> {
-  const base = await generateComponentCode(model, component, availableTokens);
+  childContracts?: Map<string, ChildContract>,
+): Promise<GeneratedComponentFiles & { contract: ComponentContract; reviewFindings: Finding[]; reviewPassed: boolean }> {
+  const base = await generateComponentCode(model, component, availableTokens, childContracts);
 
   const paths = componentSourcePaths(component.slug, component.isIcon);
   const componentName = componentIdentifier(component.slug);
@@ -593,9 +625,8 @@ export async function generateComponentCodeReviewed(
     componentName,
     fileBase,
     tokenVarNames: new Set(availableTokens.map((t) => toCssVarName(t.name)).filter(Boolean)),
-    // populated in Task 4 (buildOwnProps / buildComposedProps); empty here = gates no-op
-    ownProps: new Map(),
-    composedProps: new Map(),
+    ownProps: buildOwnProps(contract),
+    composedProps: buildComposedProps(component.uses, childContracts),
   };
 
   const files: GeneratedFiles = {
@@ -606,7 +637,7 @@ export async function generateComponentCodeReviewed(
   };
 
   const applyFix = (f: GeneratedFiles, findings: Finding[]) =>
-    holisticFix(model, component, contract, f, findings, componentName);
+    holisticFix(model, component, contract, f, findings, componentName, childContracts);
 
   const review = await reviewAndFix({
     model,
