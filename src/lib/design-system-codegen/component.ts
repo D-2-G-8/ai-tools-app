@@ -19,6 +19,8 @@ import {
   type ClassNameCheckResult,
   type StoriesCheckResult,
 } from "./checks";
+import { reviewAndFix } from "./review";
+import type { Finding, FileKind, GeneratedFiles, ReviewContext } from "./review";
 
 // Re-exported so existing `from ".../component"` import sites keep working after
 // these pure helpers moved to ./paths (which has no server-only, so icon.ts and
@@ -216,6 +218,7 @@ async function generateTsx(
   contract: ComponentContract,
   componentName: string,
   fileBase: string,
+  reviewFeedback?: string,
 ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
   const anthropic = await getAnthropicClient();
   const result = await generateText({
@@ -267,6 +270,10 @@ async function generateTsx(
       "- Reference styles ONLY via styles.<name>, copying each class name from the list above character-for-character (they are camelCase, so always dot access `styles.foo` -- never `styles['a-b']`, never a name not in the list). Never invent a class, never use inline styles for static styling, never hardcode a color/size value.",
       "- If a section only renders when a boolean prop is true (e.g. `{opened && <div className={styles.body}>...}`), a CSS open/close TRANSITION on that element is dead code (it mounts already-open). Either always render it and toggle an `open` class, or don't write a transition for it.",
       "- No default export.",
+      reviewFeedback
+        ? "\nA prior version of THIS file failed review. You MUST fix ALL of these and change nothing else that was already correct:\n" +
+          reviewFeedback
+        : "",
     ].join("\n"),
   });
   return {
@@ -281,6 +288,7 @@ async function generateCss(
   component: ComponentForCodegen,
   contract: ComponentContract,
   availableTokens: TokenForCss[],
+  reviewFeedback?: string,
 ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
   const tokenByName = new Map(availableTokens.map((t) => [t.name, t]));
   const chosenTokens = contract.cssVariables
@@ -303,6 +311,10 @@ async function generateCss(
       "If an \"Actual Figma design\" block is given above, match its exact px dimensions, corner radii, gaps/padding, and per-variant typography -- these are the real measured values, use them.",
       `Reference color/shadow values ONLY via the EXACT var() names below (they match the generated tokens.css; CSS custom properties are case-sensitive, so copy each var(--...) verbatim). Never a hardcoded color/shadow value, never a token not in this list; px sizes/radii/gaps from the design block are written directly:`,
       chosenTokens.map((t) => `- var(--${toCssVarName(t.name)}) (${t.category}) = ${t.value}`).join("\n") || "(no tokens chosen)",
+      reviewFeedback
+        ? "\nA prior version of THIS file failed review. You MUST fix ALL of these and change nothing else that was already correct:\n" +
+          reviewFeedback
+        : "",
     ].join("\n"),
   });
   return {
@@ -318,6 +330,7 @@ async function generateStories(
   contract: ComponentContract,
   componentName: string,
   fileBase: string,
+  reviewFeedback?: string,
 ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
   // Icons get their own "Icons/" Storybook section (mirrors the src/icons/
   // folder split and the app's separate Icons tab); everything else is a
@@ -385,6 +398,10 @@ async function generateStories(
         "production: a component named \"Default\" broke the whole Storybook build this way). Aliasing the " +
         "import to a fixed, neutral name sidesteps this category of collision entirely, regardless of what the " +
         "component itself is named.",
+      reviewFeedback
+        ? "\nA prior version of THIS file failed review. You MUST fix ALL of these and change nothing else that was already correct:\n" +
+          reviewFeedback
+        : "",
     ].join("\n"),
   });
   return {
@@ -406,7 +423,7 @@ export async function generateComponentCode(
   model: string,
   component: ComponentForCodegen,
   availableTokens: TokenForCss[],
-): Promise<GeneratedComponentFiles> {
+): Promise<GeneratedComponentFiles & { contract: ComponentContract }> {
   // Computed from the slug rather than asked of the LLM (the contract
   // schema used to have a `componentName` field) -- this makes the
   // Storybook story id ("components-<sanitized componentName>--default")
@@ -441,6 +458,7 @@ export async function generateComponentCode(
   const outputTokens = o1 + tsx.outputTokens + css.outputTokens + stories.outputTokens;
 
   return {
+    contract,
     componentName,
     tsxPath: paths.tsxPath,
     tsxContent: tsx.content,
@@ -464,5 +482,63 @@ export async function generateComponentCode(
     inputTokens,
     outputTokens,
     costUsd: estimateCostUsd(model, inputTokens, outputTokens),
+  };
+}
+
+/**
+ * Same as generateComponentCode, but runs the generated files through the
+ * review layer (deterministic gates + LLM DoD review + targeted
+ * regeneration) before returning. The regeneration closures reuse the SAME
+ * contract the first pass produced, so class/prop names stay stable across
+ * review iterations instead of drifting into new mismatches.
+ */
+export async function generateComponentCodeReviewed(
+  model: string,
+  component: ComponentForCodegen,
+  availableTokens: TokenForCss[],
+): Promise<GeneratedComponentFiles & { reviewFindings: Finding[]; reviewPassed: boolean }> {
+  const base = await generateComponentCode(model, component, availableTokens);
+
+  const paths = componentSourcePaths(component.slug, component.isIcon);
+  const componentName = componentIdentifier(component.slug);
+  const fileBase = paths.componentName;
+  const contract = base.contract; // reuse the SAME contract (stable names)
+
+  const ctx: ReviewContext = {
+    componentName,
+    fileBase,
+    tokenVarNames: new Set(availableTokens.map((t) => toCssVarName(t.name)).filter(Boolean)),
+  };
+
+  const files: GeneratedFiles = {
+    tsx: base.tsxContent,
+    css: base.cssContent,
+    stories: base.storiesContent,
+    index: base.indexContent,
+  };
+
+  const regenerateFile = async (kind: FileKind, feedback: string): Promise<string> => {
+    if (kind === "tsx") return (await generateTsx(model, component, contract, componentName, fileBase, feedback)).content;
+    if (kind === "css") return (await generateCss(model, component, contract, availableTokens, feedback)).content;
+    if (kind === "stories") return (await generateStories(model, component, contract, componentName, fileBase, feedback)).content;
+    return files[kind]; // index never regenerated by LLM
+  };
+
+  const review = await reviewAndFix({
+    model,
+    files,
+    ctx,
+    spec: component.designSpec,
+    regenerateFile,
+  });
+
+  return {
+    ...base,
+    tsxContent: review.files.tsx,
+    cssContent: review.files.css,
+    storiesContent: review.files.stories,
+    indexContent: review.files.index,
+    reviewFindings: review.findings,
+    reviewPassed: review.passed,
   };
 }
