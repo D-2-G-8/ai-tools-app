@@ -52,11 +52,25 @@ function extractDefinedClassNames(cssContent: string): Set<string> {
  * doesn't match) before anything is committed -- see component.ts's top
  * comment.
  */
-export function checkClassNamesMatch(tsxContent: string, cssContent: string): ClassNameCheckResult {
+/**
+ * The class names a component's TSX references via `styles.<name>` /
+ * `styles["name"]` -- the EXACT set its stylesheet must define for the build to
+ * resolve. Generating the scss from THIS (instead of the contract's declared
+ * list) makes tsx and scss agree by construction, killing the "class referenced
+ * in tsx but missing from scss" (A3) drift that complex components (InputText's
+ * 10+ state classes) hit when the two files are generated independently.
+ * Dynamic `styles[`x${y}`]` template refs are intentionally not captured -- A3
+ * can't verify them either, so both sides stay consistent about what's checked.
+ */
+export function extractReferencedClasses(tsxContent: string): string[] {
   const referenced = new Set<string>();
   for (const m of tsxContent.matchAll(/styles\.([A-Za-z_$][A-Za-z0-9_$]*)/g)) referenced.add(m[1]);
   for (const m of tsxContent.matchAll(/styles\[["']([^"']+)["']\]/g)) referenced.add(m[1]);
+  return [...referenced];
+}
 
+export function checkClassNamesMatch(tsxContent: string, cssContent: string): ClassNameCheckResult {
+  const referenced = new Set(extractReferencedClasses(tsxContent));
   const defined = extractDefinedClassNames(cssContent);
 
   const missingClasses = [...referenced].filter((name) => !defined.has(name));

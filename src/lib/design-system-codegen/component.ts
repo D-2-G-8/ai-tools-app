@@ -25,6 +25,7 @@ import {
 import {
   checkClassNamesMatch,
   checkStoriesNoNameCollision,
+  extractReferencedClasses,
   type ClassNameCheckResult,
   type StoriesCheckResult,
 } from "./checks";
@@ -321,7 +322,12 @@ async function generateCss(
   contract: ComponentContract,
   availableTokens: TokenForCss[],
   reviewFeedback?: string,
+  requiredClasses?: string[],
 ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
+  // Prefer the classes the TSX ACTUALLY references (so scss covers exactly what
+  // the component uses -> no A3 drift); fall back to the contract's declared
+  // list when not provided.
+  const classList = requiredClasses && requiredClasses.length > 0 ? requiredClasses : contract.classNames;
   const tokenByName = new Map(availableTokens.map((t) => [t.name, t]));
   const chosenTokens = contract.cssVariables
     .map((name) => tokenByName.get(name))
@@ -338,7 +344,7 @@ async function generateCss(
     prompt: [
       describeComponent(component),
       "",
-      `Write a rule for EVERY one of these class names, copied character-for-character, all camelCase (e.g. .buttonPrimary) -- do NOT rename to kebab-case or BEM, do NOT add or drop any, and do NOT leave any without its own selector (even a boolean/marker modifier like .withBadge MUST get a rule, even if minimal): ${contract.classNames.join(", ")}. You MAY additionally combine them in compound/nested selectors (e.g. \`.squared.sizeMd\`, \`.avatar .badge\`) for variant-specific rules, but every class token used must be one of these exact names.`,
+      `Write a rule for EVERY one of these class names, copied character-for-character, all camelCase (e.g. .buttonPrimary) -- do NOT rename to kebab-case or BEM, do NOT add or drop any, and do NOT leave any without its own selector (even a boolean/marker modifier like .withBadge MUST get a rule, even if minimal). These are EXACTLY the classes the component references, so the stylesheet MUST define all of them: ${classList.join(", ")}. You MAY additionally combine them in compound/nested selectors (e.g. \`.squared.sizeMd\`, \`.avatar .badge\`) for variant-specific rules, but every class token used must be one of these exact names.`,
       "Each variant/state class must actually ENCODE the visual DIFFERENCE that variant shows in the design (its own color/rotation/border/size/position), NOT an empty rule or one identical to the base state -- a state class that renders the same as the base makes that prop do nothing. E.g. an `.opened` class should carry the transform/height/etc. that the opened variant differs by; a `.selected`/`.error`/`.disabled` class should carry its distinct color/border/opacity from the design.",
       "If an \"Actual Figma design\" block is given above, match its exact px dimensions, corner radii, gaps/padding, and per-variant typography -- these are the real measured values, use them.",
       `Reference color/shadow values via the EXACT var() names below (they match the generated tokens.css; CSS custom properties are case-sensitive, so copy each var(--...) verbatim); px sizes/radii/gaps from the design block are written directly. CRITICAL: never write \`var(--x)\` for an x NOT in this list -- there is no --font-family-*, --text-primary, --focus-ring etc. unless it appears below. If the design needs a value with NO matching token here (a font-family, or a color/size the list doesn't cover), INLINE the literal value (e.g. \`font-family: 'Roboto Flex', sans-serif;\`, \`color: #1c1c1c;\`) or define a local \`--x:\` custom property in this stylesheet -- inlining is correct and expected in that case. Inventing a var() that isn't a real token below is the one thing that breaks the build:`,
@@ -624,9 +630,15 @@ export async function generateComponentCode(
   const componentName = componentIdentifier(component.slug); // the JS identifier (never starts with a digit)
   const { contract, inputTokens: t1, outputTokens: o1 } = await generateContract(model, component, availableTokens);
 
-  const [tsx, css, stories] = await Promise.all([
-    generateTsx(model, component, contract, componentName, fileBase, childContracts),
-    generateCss(model, component, contract, availableTokens),
+  // TSX first, then generate the scss from the classes the TSX ACTUALLY
+  // references (extractReferencedClasses) so the two agree by construction --
+  // the parallel version let complex components (InputText's 10+ state classes)
+  // drift into an A3 "class referenced in tsx but missing from scss" mismatch
+  // the autofix couldn't always reconcile. Stories still run alongside the scss.
+  const tsx = await generateTsx(model, component, contract, componentName, fileBase, childContracts);
+  const requiredClasses = extractReferencedClasses(tsx.content);
+  const [css, stories] = await Promise.all([
+    generateCss(model, component, contract, availableTokens, undefined, requiredClasses),
     generateStories(model, component, contract, componentName, fileBase),
   ]);
 
