@@ -9,10 +9,39 @@ import { componentSourcePaths } from "@/lib/design-system-codegen/component";
 import { generateTokensCss } from "@/lib/design-system-codegen/tokens";
 import { getOrOpenSessionBranch } from "@/lib/design-system-codegen/session";
 import { reconcileCodeSyncWithRepo } from "@/lib/design-system-codegen/reconcile";
-import { commitFiles, type CommitFile } from "@/lib/github/client";
+import { commitFiles, listBranchPaths, getDesignSystemBaseBranch, type CommitFile } from "@/lib/github/client";
 import { finishCodeGenSession } from "./codegen-actions";
 
 const SETTINGS_PATH = "/design-system/settings";
+
+/**
+ * The branch a "remove from repo" cleanup should commit its deletions to --
+ * WITHOUT ever minting a fresh branch as a surprising side effect of a cleanup
+ * click. Reuses the currently-open PR branch if it still exists; otherwise
+ * opens a session branch ONLY when the files are genuinely still on the base
+ * branch (they were merged, so removing them really does need a PR). Returns
+ * null when there's nothing in the repo to change -- the caller then does a
+ * DB-only cleanup, so clicking "delete" right after you deleted your branch/PR
+ * can't resurrect a phantom `figma-sync-<ts>` branch. `filesOnBase` is asked
+ * only when needed (no open PR) to keep the common path to a single API call.
+ */
+async function branchForRepoCleanup(
+  workspaceId: string,
+  filesOnBase: (basePaths: Set<string>) => boolean,
+): Promise<string | null> {
+  const [ws] = await db
+    .select({ branch: workspace.designSystemPendingPrBranch })
+    .from(workspace)
+    .where(eq(workspace.id, workspaceId))
+    .limit(1);
+  if (ws?.branch) {
+    const exists = await listBranchPaths(ws.branch);
+    if (exists) return ws.branch; // reuse the open PR branch; never open a new one
+  }
+  const basePaths = await listBranchPaths(getDesignSystemBaseBranch());
+  if (basePaths && filesOnBase(basePaths)) return getOrOpenSessionBranch(workspaceId);
+  return null; // nothing in the repo -> DB-only cleanup, no branch minted
+}
 
 /**
  * Bulk cleanup for stale/duplicate Figma-synced data (see design-system/
@@ -92,18 +121,27 @@ export async function clearCodeSyncedComponents(): Promise<ClearCodeSyncedResult
       .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.codeSyncStatus, "committed")));
     if (committed.length === 0) return { ok: true, deleted: 0 };
 
-    const branchName = await getOrOpenSessionBranch(workspaceId);
-    const files: CommitFile[] = committed.flatMap((c) => {
-      const paths = componentSourcePaths(c.slug, c.isIcon);
-      return [
-        { path: paths.tsxPath, content: null },
-        { path: paths.cssPath, content: null },
-        { path: paths.storiesPath, content: null },
-        { path: paths.indexPath, content: null },
-      ];
-    });
-    await commitFiles(branchName, `Remove ${committed.length} component(s)`, files);
-    const { prUrl } = await finishCodeGenSession(branchName);
+    // Only touch the repo (via the open PR branch, or a new one if the files
+    // were merged to base) when there's genuinely something there to remove;
+    // otherwise this is a DB-only cleanup and must NOT mint a branch.
+    const branchName = await branchForRepoCleanup(workspaceId, (basePaths) =>
+      committed.some((c) => basePaths.has(componentSourcePaths(c.slug, c.isIcon).tsxPath)),
+    );
+
+    let prUrl: string | undefined;
+    if (branchName) {
+      const files: CommitFile[] = committed.flatMap((c) => {
+        const paths = componentSourcePaths(c.slug, c.isIcon);
+        return [
+          { path: paths.tsxPath, content: null },
+          { path: paths.cssPath, content: null },
+          { path: paths.storiesPath, content: null },
+          { path: paths.indexPath, content: null },
+        ];
+      });
+      await commitFiles(branchName, `Remove ${committed.length} component(s)`, files);
+      ({ prUrl } = await finishCodeGenSession(branchName));
+    }
 
     await db
       .delete(designComponent)
@@ -157,12 +195,20 @@ export async function clearCodeSyncedTokens(): Promise<ClearCodeSyncedResult> {
   const remaining = all.filter((t) => t.lastCodeSyncAt === null);
 
   try {
-    const tokensCss = generateTokensCss(
-      remaining.map((t) => ({ name: t.name, category: t.category as DesignTokenCategory, value: t.value })),
-    );
-    const branchName = await getOrOpenSessionBranch(workspaceId);
-    await commitFiles(branchName, `Remove ${codeSynced.length} token(s)`, [{ path: "src/tokens/tokens.css", content: tokensCss }]);
-    const { prUrl } = await finishCodeGenSession(branchName);
+    // Same "no surprise branch" rule as components: commit the rebuilt
+    // tokens.css only to an existing open PR branch (or a new one if tokens.css
+    // is genuinely on base), else DB-only cleanup.
+    const branchName = await branchForRepoCleanup(workspaceId, (basePaths) => basePaths.has("src/tokens/tokens.css"));
+    let prUrl: string | undefined;
+    if (branchName) {
+      const tokensCss = generateTokensCss(
+        remaining.map((t) => ({ name: t.name, category: t.category as DesignTokenCategory, value: t.value })),
+      );
+      await commitFiles(branchName, `Remove ${codeSynced.length} token(s)`, [
+        { path: "src/tokens/tokens.css", content: tokensCss },
+      ]);
+      ({ prUrl } = await finishCodeGenSession(branchName));
+    }
 
     await db.delete(designToken).where(
       and(
