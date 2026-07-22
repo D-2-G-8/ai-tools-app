@@ -48,12 +48,13 @@ async function loadComponent(slug: string) {
     .from(workspace)
     .where(eq(workspace.id, workspaceId))
     .limit(1);
-  const standUrl = ws?.designSystemPendingPrBranch
-    ? storybookStandUrl(
-        ws.designSystemPendingPrBranch,
-        process.env.DESIGN_SYSTEM_STORYBOOK_URL_TEMPLATE ?? process.env.DESIGN_SYSTEM_STORYBOOK_URL,
-      )
-    : null;
+  // Pass the branch straight through -- storybookStandUrl handles it: a fixed
+  // stand (no {branch}) resolves even without an open PR; a {branch} template
+  // needs one. Gating on the branch here wrongly hid a fixed stand when no PR.
+  const standUrl = storybookStandUrl(
+    ws?.designSystemPendingPrBranch ?? null,
+    process.env.DESIGN_SYSTEM_STORYBOOK_URL_TEMPLATE ?? process.env.DESIGN_SYSTEM_STORYBOOK_URL,
+  );
   return { component, figmaFileKey: ws?.figmaFileKey ?? undefined, standUrl };
 }
 
@@ -207,7 +208,7 @@ function DesignSystemPreview({
       <section className="rounded-lg border border-neutral-200 bg-white p-5">
         <h3 className="mb-1 text-sm font-medium text-neutral-700">Storybook preview</h3>
         <p className="text-xs text-neutral-400">
-          Set DESIGN_SYSTEM_STORYBOOK_URL (see .env.example) once the design-system repo&apos;s Storybook is
+          Set DESIGN_SYSTEM_STORYBOOK_URL_TEMPLATE (see .env.example) once the design-system repo&apos;s Storybook is
           deployed, to preview this component live here.
         </p>
       </section>

@@ -134,12 +134,16 @@ export function vercelBranchSlug(branch: string): string {
 
 /** The Storybook stand base URL for a branch, from a template that MAY contain a
  *  `{branch}` placeholder (set once, e.g.
- *  "https://design-system-git-{branch}-<team>.vercel.app"). No placeholder ->
- *  the template verbatim (a single fixed stand). Null if the template is unset.
- *  Trailing slashes trimmed. NB: Vercel truncates+hashes branch names >~63 chars
- *  -- our figma-sync-<ts> branches are short, so the alias is exact. */
-export function storybookStandUrl(branch: string, template: string | undefined): string | null {
+ *  "https://design-system-git-{branch}-<team>.vercel.app"). A template WITHOUT
+ *  `{branch}` is a single FIXED stand -- returned verbatim regardless of branch
+ *  (so the legacy DESIGN_SYSTEM_STORYBOOK_URL keeps working when no PR is open).
+ *  A `{branch}` template NEEDS a branch -> null when branch is null/empty. Null
+ *  if the template is unset. Trailing slashes trimmed. NB: Vercel truncates+
+ *  hashes branch names >~63 chars -- our figma-sync-<ts> branches are short. */
+export function storybookStandUrl(branch: string | null, template: string | undefined): string | null {
   if (!template) return null;
-  const base = template.includes("{branch}") ? template.replace(/\{branch\}/g, vercelBranchSlug(branch)) : template;
+  if (!template.includes("{branch}")) return template.replace(/\/+$/, ""); // fixed stand, branch irrelevant
+  if (!branch) return null; // a {branch} template can't resolve without a branch
+  const base = template.replace(/\{branch\}/g, vercelBranchSlug(branch));
   return base.replace(/\/+$/, "");
 }

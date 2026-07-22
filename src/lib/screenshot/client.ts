@@ -1,6 +1,10 @@
 import "server-only";
 
-const SCREENSHOT_TIMEOUT_MS = 45_000;
+// Kept well under the visual-review route's maxDuration=60 so a merely-slow
+// screenshot can't push the whole request past the function limit (a 504 would
+// bypass the graceful never-500 guarantee) -- it leaves room for the Figma
+// render + vision + fix LLM calls in the same request.
+const SCREENSHOT_TIMEOUT_MS = 25_000;
 
 /** Screenshot a public URL via an external service (ScreenshotOne by default;
  *  override the base with SCREENSHOT_API_URL). Returns raw PNG bytes. Throws a

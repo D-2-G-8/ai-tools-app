@@ -22,7 +22,7 @@ export interface VisualReviewResult {
 }
 
 async function fetchPng(url: string): Promise<{ bytes: Uint8Array; mediaType: string }> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  const res = await fetch(url, { signal: AbortSignal.timeout(12_000) });
   if (!res.ok) throw new Error(`Figma image fetch ${res.status}`);
   return { bytes: new Uint8Array(await res.arrayBuffer()), mediaType: "image/png" };
 }
@@ -65,7 +65,18 @@ export async function visualReviewComponent(workspaceId: string, userId: string,
 
     // rendered screenshot
     const storyUrl = `${stand}/iframe.html?id=${storybookDefaultStoryId(slug, row.isIcon)}&viewMode=story`;
-    const rendered = await captureScreenshot(storyUrl);
+    let rendered: { bytes: Uint8Array; mediaType: string };
+    try {
+      rendered = await captureScreenshot(storyUrl);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // A 404 means this branch's Storybook hasn't finished deploying yet -- a
+      // common first-run case; give a retry hint rather than the raw error.
+      if (/\b404\b/.test(msg)) {
+        return { ...base, error: "This branch's Storybook stand isn't deployed yet -- wait for the build to finish and retry." };
+      }
+      throw err;
+    }
 
     // figma reference
     const token = await getValidFigmaAccessToken();
