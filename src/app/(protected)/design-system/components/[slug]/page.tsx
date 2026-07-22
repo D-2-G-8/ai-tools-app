@@ -7,7 +7,9 @@ import { getCurrentWorkspaceId } from "@/db/workspace";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { figmaNodeUrl } from "@/lib/figma/links";
 import { storybookDefaultStoryId } from "@/lib/design-system-codegen/component";
+import { storybookStandUrl } from "@/lib/design-system-codegen/paths";
 import { ResyncComponentButton } from "./resync-component-button";
+import { VisualReviewButton } from "./visual-review-button";
 import { GenerateWithDepsButton } from "./generate-with-deps-button";
 import { DeleteComponentButton } from "../delete-component-button";
 
@@ -34,16 +36,26 @@ async function loadComponent(slug: string) {
     .from(designComponent)
     .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.slug, slug)))
     .limit(1);
-  if (!component) return { component: undefined, figmaFileKey: undefined };
+  if (!component) return { component: undefined, figmaFileKey: undefined, standUrl: null };
 
-  // Only needed to build the "open in Figma" links below -- a second,
-  // cheap single-column select rather than widening the component query.
+  // Only needed to build the "open in Figma" links + the Storybook stand URL
+  // below -- a second, cheap select rather than widening the component query.
   const [ws] = await db
-    .select({ figmaFileKey: workspace.figmaFileKey })
+    .select({
+      figmaFileKey: workspace.figmaFileKey,
+      designSystemPendingPrBranch: workspace.designSystemPendingPrBranch,
+    })
     .from(workspace)
     .where(eq(workspace.id, workspaceId))
     .limit(1);
-  return { component, figmaFileKey: ws?.figmaFileKey ?? undefined };
+  // Pass the branch straight through -- storybookStandUrl handles it: a fixed
+  // stand (no {branch}) resolves even without an open PR; a {branch} template
+  // needs one. Gating on the branch here wrongly hid a fixed stand when no PR.
+  const standUrl = storybookStandUrl(
+    ws?.designSystemPendingPrBranch ?? null,
+    process.env.DESIGN_SYSTEM_STORYBOOK_URL_TEMPLATE ?? process.env.DESIGN_SYSTEM_STORYBOOK_URL,
+  );
+  return { component, figmaFileKey: ws?.figmaFileKey ?? undefined, standUrl };
 }
 
 export default async function DesignComponentDetailPage({
@@ -52,7 +64,7 @@ export default async function DesignComponentDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const { component, figmaFileKey } = await loadComponent(slug);
+  const { component, figmaFileKey, standUrl } = await loadComponent(slug);
   if (!component) notFound();
 
   return (
@@ -118,6 +130,11 @@ export default async function DesignComponentDetailPage({
           <GenerateWithDepsButton slug={component.slug} name={component.name} />
         </div>
         <ResyncComponentButton slug={component.slug} />
+        {component.codeSyncStatus === "committed" && (
+          <div className="mt-3 border-t border-neutral-100 pt-3">
+            <VisualReviewButton slug={component.slug} />
+          </div>
+        )}
         <div className="mt-3 border-t border-neutral-100 pt-3">
           <DeleteComponentButton
             slug={component.slug}
@@ -128,7 +145,12 @@ export default async function DesignComponentDetailPage({
         </div>
       </section>
 
-      <DesignSystemPreview slug={component.slug} isIcon={component.isIcon} codeSyncStatus={component.codeSyncStatus} />
+      <DesignSystemPreview
+        slug={component.slug}
+        isIcon={component.isIcon}
+        codeSyncStatus={component.codeSyncStatus}
+        standUrl={standUrl}
+      />
 
       {component.figmaNodeIds.length > 0 && (
         <section className="text-xs text-neutral-400">
@@ -172,19 +194,21 @@ function DesignSystemPreview({
   slug,
   isIcon,
   codeSyncStatus,
+  standUrl,
 }: {
   slug: string;
   isIcon: boolean;
   codeSyncStatus: string;
+  standUrl: string | null;
 }) {
-  const storybookUrl = process.env.DESIGN_SYSTEM_STORYBOOK_URL?.replace(/\/+$/, "");
+  const storybookUrl = standUrl;
 
   if (!storybookUrl) {
     return (
       <section className="rounded-lg border border-neutral-200 bg-white p-5">
         <h3 className="mb-1 text-sm font-medium text-neutral-700">Storybook preview</h3>
         <p className="text-xs text-neutral-400">
-          Set DESIGN_SYSTEM_STORYBOOK_URL (see .env.example) once the design-system repo&apos;s Storybook is
+          Set DESIGN_SYSTEM_STORYBOOK_URL_TEMPLATE (see .env.example) once the design-system repo&apos;s Storybook is
           deployed, to preview this component live here.
         </p>
       </section>

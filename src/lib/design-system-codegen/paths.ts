@@ -125,3 +125,25 @@ export function storybookDefaultStoryId(slug: string, isIcon: boolean): string {
   const sanitizedComponentName = componentIdentifier(slug).toLowerCase();
   return `${isIcon ? "icons" : "components"}-${sanitizedComponentName}--default`;
 }
+
+/** A git branch name -> the slug Vercel uses in its deterministic branch alias
+ *  `<project>-git-<slug>-<team>.vercel.app` (lowercase, non-alphanumeric -> "-"). */
+export function vercelBranchSlug(branch: string): string {
+  return branch.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/** The Storybook stand base URL for a branch, from a template that MAY contain a
+ *  `{branch}` placeholder (set once, e.g.
+ *  "https://design-system-git-{branch}-<team>.vercel.app"). A template WITHOUT
+ *  `{branch}` is a single FIXED stand -- returned verbatim regardless of branch
+ *  (so the legacy DESIGN_SYSTEM_STORYBOOK_URL keeps working when no PR is open).
+ *  A `{branch}` template NEEDS a branch -> null when branch is null/empty. Null
+ *  if the template is unset. Trailing slashes trimmed. NB: Vercel truncates+
+ *  hashes branch names >~63 chars -- our figma-sync-<ts> branches are short. */
+export function storybookStandUrl(branch: string | null, template: string | undefined): string | null {
+  if (!template) return null;
+  if (!template.includes("{branch}")) return template.replace(/\/+$/, ""); // fixed stand, branch irrelevant
+  if (!branch) return null; // a {branch} template can't resolve without a branch
+  const base = template.replace(/\{branch\}/g, vercelBranchSlug(branch));
+  return base.replace(/\/+$/, "");
+}
