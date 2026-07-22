@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { designToken, designComponent, type DesignTokenCategory, type DesignComponentVariant, type DesignComponentState } from "@/db/schema";
 import { figmaGet, FIGMA_FILE_FETCH_TIMEOUT_MS, describeFigmaError } from "./client";
 import { deriveTokensFromComponents } from "@/lib/design-system-codegen/token-derive";
+import { slugify } from "@/lib/design-system-codegen/paths";
 
 /**
  * Pulls a Figma file's styles and components and upserts them into
@@ -292,15 +293,9 @@ function parseVariantName(name: string): { key: string; value: string }[] | null
   return pairs.every((p) => p !== null) ? (pairs as { key: string; value: string }[]) : null;
 }
 
-function slugify(name: string): string {
-  return (
-    name
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "component"
-  );
-}
+// slugify moved to ../design-system-codegen/paths.ts (imported above) so it
+// lives next to componentIdentifier and round-trips with it -- see its doc
+// comment for why camelCase boundaries matter (InputText -> input-text).
 
 interface NormalizedComponentSet {
   nodeId: string;
@@ -651,6 +646,30 @@ async function upsertComponentGroups(
   return componentsUpserted;
 }
 
+/**
+ * Turns a failed component-library fetch (`/components`, `/component_sets`) into
+ * an actionable message. A 403 "Invalid scope" is NOT transient: the Figma
+ * token is missing the `library_content:read` scope (see FIGMA_OAUTH_SCOPES) --
+ * regenerate the PAT / reconnect OAuth with it. Any other failure (timeout,
+ * 5xx) usually IS transient, so tell the user to retry.
+ */
+function libraryFetchFailureMessage(err: unknown): string {
+  const detail = err instanceof Error ? err.message : String(err);
+  if (/\b403\b|invalid scope|forbidden/i.test(detail)) {
+    return (
+      'Figma denied access to this file\'s component-library endpoints (403 -- the token is missing ' +
+      'the "library_content:read" scope). Regenerate your Figma personal access token with the ' +
+      '"Library content: read" scope enabled (or reconnect Figma in Settings), then sync again. ' +
+      `Underlying error: ${detail}`
+    );
+  }
+  return (
+    "Figma's component-library endpoints didn't respond in time (this file has a very large " +
+    "component library). This is usually transient -- please run the sync again. " +
+    `Underlying error: ${detail}`
+  );
+}
+
 // ---- Progress reporting ----
 
 export interface SyncProgressEvent {
@@ -690,19 +709,33 @@ async function tryFastSync(
     console.warn(`[figma-sync] styles fetch failed for ${fileKey} (continuing without style tokens): ${describeFigmaError(err)}`);
     return null;
   };
-  const [stylesRes, componentsRes, setsRes] = await Promise.all([
-    figmaGet<FigmaFileStylesResponse>(`/files/${key}/styles`, accessToken).catch(onStylesError),
-    figmaGet<FigmaFileComponentsResponse>(`/files/${key}/components`, accessToken).catch(() => null),
-    figmaGet<FigmaFileComponentSetsResponse>(`/files/${key}/component_sets`, accessToken).catch(() => null),
-  ]);
+  // Styles may fail-soft (tokens are optional -- log and continue), but the
+  // COMPONENT-library endpoints must not be swallowed: on a very large library
+  // they can exceed the 20s default, so give them the 55s budget, and let a
+  // real failure THROW instead of returning null. Returning null here makes the
+  // caller fall back to the full ~52MB file walk -- heavier and even more
+  // likely to time out -- so a slow list would become a guaranteed timeout.
+  let stylesRes: FigmaFileStylesResponse | null;
+  let componentsRes: FigmaFileComponentsResponse;
+  let setsRes: FigmaFileComponentSetsResponse;
+  try {
+    [stylesRes, componentsRes, setsRes] = await Promise.all([
+      figmaGet<FigmaFileStylesResponse>(`/files/${key}/styles`, accessToken).catch(onStylesError),
+      figmaGet<FigmaFileComponentsResponse>(`/files/${key}/components`, accessToken, FIGMA_FILE_FETCH_TIMEOUT_MS),
+      figmaGet<FigmaFileComponentSetsResponse>(`/files/${key}/component_sets`, accessToken, FIGMA_FILE_FETCH_TIMEOUT_MS),
+    ]);
+  } catch (err) {
+    throw new Error(libraryFetchFailureMessage(err));
+  }
 
   const styles = stylesRes?.meta.styles ?? [];
-  const components = componentsRes?.meta.components ?? [];
-  const componentSets = setsRes?.meta.component_sets ?? [];
+  const components = componentsRes.meta.components ?? [];
+  const componentSets = setsRes.meta.component_sets ?? [];
 
   if (styles.length === 0 && components.length === 0 && componentSets.length === 0) {
-    // Signals "this file doesn't look like a published library" to the caller, not an error --
-    // the caller falls back to the full-file walk.
+    // All three SUCCEEDED but returned nothing -> genuinely not a published
+    // library (not a timed-out fast path). Signals the caller to fall back to
+    // the full-file walk (correct only because such files are small).
     return null;
   }
 
@@ -1006,16 +1039,32 @@ export async function resyncComponentsFromFigma(
   onProgress: OnSyncProgress = () => {},
 ): Promise<ComponentsResyncResult> {
   const key = encodeURIComponent(fileKey);
-  const [componentsRes, setsRes] = await Promise.all([
-    figmaGet<FigmaFileComponentsResponse>(`/files/${key}/components`, accessToken).catch(() => null),
-    figmaGet<FigmaFileComponentSetsResponse>(`/files/${key}/component_sets`, accessToken).catch(() => null),
-  ]);
-  const components = componentsRes?.meta.components ?? [];
-  const componentSets = setsRes?.meta.component_sets ?? [];
+  // The library-metadata endpoints can legitimately take longer than the 20s
+  // default for a very large library (this file has ~1967 components), so give
+  // them the same 55s budget as the other file fetches -- the 20s default was
+  // timing them out.
+  let componentsRes: FigmaFileComponentsResponse;
+  let setsRes: FigmaFileComponentSetsResponse;
+  try {
+    [componentsRes, setsRes] = await Promise.all([
+      figmaGet<FigmaFileComponentsResponse>(`/files/${key}/components`, accessToken, FIGMA_FILE_FETCH_TIMEOUT_MS),
+      figmaGet<FigmaFileComponentSetsResponse>(`/files/${key}/component_sets`, accessToken, FIGMA_FILE_FETCH_TIMEOUT_MS),
+    ]);
+  } catch (err) {
+    // These endpoints FAILED. Do NOT silently fall back to GET /files/{key}
+    // (the full ~52MB file walk): that path is HEAVIER and even more likely to
+    // blow the budget, so a slow list would turn into a guaranteed timeout.
+    // Surface the real error (scope vs transient) so the user can act on it.
+    throw new Error(libraryFetchFailureMessage(err));
+  }
+  const components = componentsRes.meta.components ?? [];
+  const componentSets = setsRes.meta.component_sets ?? [];
 
   if (components.length === 0 && componentSets.length === 0) {
-    // Not a published library (or genuinely has zero components) --
-    // mirrors syncViaFullFileWalk's components phase, without touching tokens.
+    // BOTH endpoints SUCCEEDED but returned nothing -> this is genuinely not a
+    // published library (a plain design file), not a timed-out fast path. Only
+    // here is the full-file walk correct (such files are small). Mirrors
+    // syncViaFullFileWalk's components phase, without touching tokens.
     const file = await figmaGet<FigmaFileResponse>(`/files/${key}`, accessToken, FIGMA_FILE_FETCH_TIMEOUT_MS);
     onProgress({
       phase: "scope",

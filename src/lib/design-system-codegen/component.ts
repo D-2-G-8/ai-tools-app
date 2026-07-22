@@ -5,7 +5,7 @@ import { getAnthropicClient } from "@/lib/llm/client";
 import { estimateCostUsd } from "@/lib/models";
 import type { DesignComponentVariant, DesignComponentState, StoredComponentContract } from "@/db/schema";
 import { toCssVarName, type TokenForCss } from "./tokens";
-import { buildOwnProps, buildComposedProps } from "./review/prop-types";
+import { buildOwnProps, buildComposedProps, buildExpectedComposedImports } from "./review/prop-types";
 
 // Re-exported so existing `from ".../component"` import sites (and this
 // module's own generateComponentCodeReviewed below) can use these pure
@@ -25,6 +25,7 @@ import {
 import {
   checkClassNamesMatch,
   checkStoriesNoNameCollision,
+  extractReferencedClasses,
   type ClassNameCheckResult,
   type StoriesCheckResult,
 } from "./checks";
@@ -165,7 +166,7 @@ const contractSchema = z.object({
     ),
 });
 
-type ComponentContract = z.infer<typeof contractSchema>;
+export type ComponentContract = z.infer<typeof contractSchema>;
 
 /** The subset of a component's persisted contract a DEPENDENT needs. */
 export type ChildContract = StoredComponentContract;
@@ -321,7 +322,12 @@ async function generateCss(
   contract: ComponentContract,
   availableTokens: TokenForCss[],
   reviewFeedback?: string,
+  requiredClasses?: string[],
 ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
+  // Prefer the classes the TSX ACTUALLY references (so scss covers exactly what
+  // the component uses -> no A3 drift); fall back to the contract's declared
+  // list when not provided.
+  const classList = requiredClasses && requiredClasses.length > 0 ? requiredClasses : contract.classNames;
   const tokenByName = new Map(availableTokens.map((t) => [t.name, t]));
   const chosenTokens = contract.cssVariables
     .map((name) => tokenByName.get(name))
@@ -338,11 +344,11 @@ async function generateCss(
     prompt: [
       describeComponent(component),
       "",
-      `Write a rule for EVERY one of these class names, copied character-for-character, all camelCase (e.g. .buttonPrimary) -- do NOT rename to kebab-case or BEM, do NOT add or drop any, and do NOT leave any without its own selector (even a boolean/marker modifier like .withBadge MUST get a rule, even if minimal): ${contract.classNames.join(", ")}. You MAY additionally combine them in compound/nested selectors (e.g. \`.squared.sizeMd\`, \`.avatar .badge\`) for variant-specific rules, but every class token used must be one of these exact names.`,
+      `Write a rule for EVERY one of these class names, copied character-for-character, all camelCase (e.g. .buttonPrimary) -- do NOT rename to kebab-case or BEM, do NOT add or drop any, and do NOT leave any without its own selector (even a boolean/marker modifier like .withBadge MUST get a rule, even if minimal). These are EXACTLY the classes the component references, so the stylesheet MUST define all of them: ${classList.join(", ")}. You MAY additionally combine them in compound/nested selectors (e.g. \`.squared.sizeMd\`, \`.avatar .badge\`) for variant-specific rules, but every class token used must be one of these exact names.`,
       "Each variant/state class must actually ENCODE the visual DIFFERENCE that variant shows in the design (its own color/rotation/border/size/position), NOT an empty rule or one identical to the base state -- a state class that renders the same as the base makes that prop do nothing. E.g. an `.opened` class should carry the transform/height/etc. that the opened variant differs by; a `.selected`/`.error`/`.disabled` class should carry its distinct color/border/opacity from the design.",
       "If an \"Actual Figma design\" block is given above, match its exact px dimensions, corner radii, gaps/padding, and per-variant typography -- these are the real measured values, use them.",
-      `Reference color/shadow values ONLY via the EXACT var() names below (they match the generated tokens.css; CSS custom properties are case-sensitive, so copy each var(--...) verbatim). Never a hardcoded color/shadow value, never a token not in this list; px sizes/radii/gaps from the design block are written directly:`,
-      chosenTokens.map((t) => `- var(--${toCssVarName(t.name)}) (${t.category}) = ${t.value}`).join("\n") || "(no tokens chosen)",
+      `Reference color/shadow values via the EXACT var() names below (they match the generated tokens.css; CSS custom properties are case-sensitive, so copy each var(--...) verbatim); px sizes/radii/gaps from the design block are written directly. CRITICAL: never write \`var(--x)\` for an x NOT in this list -- there is no --font-family-*, --text-primary, --focus-ring etc. unless it appears below. If the design needs a value with NO matching token here (a font-family, or a color/size the list doesn't cover), INLINE the literal value (e.g. \`font-family: 'Roboto Flex', sans-serif;\`, \`color: #1c1c1c;\`) or define a local \`--x:\` custom property in this stylesheet -- inlining is correct and expected in that case. Inventing a var() that isn't a real token below is the one thing that breaks the build:`,
+      chosenTokens.map((t) => `- var(--${toCssVarName(t.name)}) (${t.category}) = ${t.value}`).join("\n") || "(no tokens chosen -- inline literal values)",
       reviewFeedback
         ? "\nA prior version of THIS file failed review. You MUST fix ALL of these and change nothing else that was already correct:\n" +
           reviewFeedback
@@ -467,6 +473,35 @@ function parseFixedFiles(text: string, current: GeneratedFiles): GeneratedFiles 
   };
 }
 
+/** Human-readable list of each composed child's REAL prop API (from its stored
+ *  contract), with the crucial note that the Figma spec writes instance props as
+ *  raw variant LABELS (e.g. `Appearance=Negative`, `Size=24 px`) which MUST be
+ *  mapped to these values, NOT copied verbatim. Empty string if nothing is
+ *  composed or no child contracts are available. Shared by the generation autofix
+ *  AND the LLM review -- so the reviewer stops grading correct (mapped)
+ *  composition values (appearance="negative", size="24px") as design infidelity
+ *  and pulling the autofix back toward the raw labels the deterministic gate
+ *  rejects. */
+export function composedApiDescription(
+  component: ComponentForCodegen,
+  childContracts?: Map<string, ChildContract>,
+): string {
+  if (!component.uses || component.uses.length === 0 || !childContracts) return "";
+  const lines = component.uses
+    .map((u) => {
+      const c = childContracts.get(u.slug);
+      return c ? `- ${u.componentName}: ${c.props.map((p) => `${p.name}: ${p.type}`).join("; ")}` : "";
+    })
+    .filter(Boolean);
+  if (lines.length === 0) return "";
+  return (
+    "Composed children accept ONLY these prop values. The Figma spec writes their instance props as raw " +
+    'variant LABELS (e.g. `Appearance=Negative`, `Size=24 px`); those MAP to the child\'s real values below -- ' +
+    'the code MUST use the real values (e.g. appearance="negative", size="24px"), NOT the raw labels:\n' +
+    lines.join("\n")
+  );
+}
+
 async function holisticFix(
   model: string,
   component: ComponentForCodegen,
@@ -475,8 +510,13 @@ async function holisticFix(
   findings: { file: string; message: string; suggestion?: string }[],
   componentName: string,
   childContracts?: Map<string, ChildContract>,
+  availableTokens?: TokenForCss[],
 ): Promise<{ files: GeneratedFiles; inputTokens: number; outputTokens: number }> {
   const anthropic = await getAnthropicClient();
+  const tokenByName = new Map((availableTokens ?? []).map((t) => [t.name, t]));
+  const chosenTokens = contract.cssVariables
+    .map((name) => tokenByName.get(name))
+    .filter((t): t is TokenForCss => Boolean(t));
   const result = await generateText({
     model: anthropic(model),
     system:
@@ -488,13 +528,21 @@ async function holisticFix(
       "",
       `Component name: ${componentName}. CSS Modules class names (use these EXACT names, styles.<name>): ${contract.classNames.join(", ")}`,
       `Props: ${contract.props.map((p) => `${p.name}: ${p.type}`).join("; ")}`,
+      // The ONLY real token vars. An "unknown token var" finding means the scss
+      // wrote a var(--x) that isn't one of these -- the fix is to use a real one
+      // below OR (when nothing matches, e.g. a font-family / focus ring) INLINE
+      // the literal value / define a local --x:. Never re-reference an invented
+      // token (there is no --font-family-*, --text-primary, --focus-ring unless
+      // it appears here).
+      `Valid design-token vars (the ONLY var(--x) allowed in the scss; copy verbatim): ${
+        chosenTokens.map((t) => `var(--${toCssVarName(t.name)})=${t.value}`).join(", ") || "(none)"
+      }. For any value with no matching token here, INLINE the literal (e.g. font-family, a one-off color) or define a local \`--x:\` -- do NOT write var(--x) for an x not in this list.`,
+      composedApiDescription(component, childContracts),
       component.uses && component.uses.length
-        ? `Composed children's prop APIs (pass ONLY these exact values -- match case/units):\n${component.uses
-            .map((u) => {
-              const c = childContracts?.get(u.slug);
-              return c ? `- ${u.componentName}: ${c.props.map((p) => `${p.name}: ${p.type}`).join("; ")}` : "";
-            })
-            .filter(Boolean)
+        ? `Composed components must be imported with EXACTLY these statements (copy verbatim -- correct path AND name; do NOT rename or shorten):\n${[
+            ...buildExpectedComposedImports(component.uses, component.isIcon),
+          ]
+            .map(([path, id]) => `- import { ${id} } from "${path}";`)
             .join("\n")}`
         : "",
       "",
@@ -527,6 +575,37 @@ async function holisticFix(
 }
 
 /**
+ * Run the holistic autofix over an EXISTING component's files against a set
+ * of findings (e.g. real tsc errors reported by the design-system repo's own
+ * CI, rather than this pipeline's own review layer). Reuses the exact same
+ * fixer the generation review loop uses (holisticFix, internal to this
+ * module) -- the caller supplies the files (read from the branch), the
+ * persisted contract, and the composed children's contracts, since a CI-
+ * triggered fix has none of those freshly in hand the way a just-generated
+ * component does.
+ */
+export async function fixComponentFiles(
+  model: string,
+  component: ComponentForCodegen,
+  contract: ComponentContract,
+  files: GeneratedFiles,
+  findings: { file: string; message: string }[],
+  childContracts?: Map<string, ChildContract>,
+  availableTokens?: TokenForCss[],
+): Promise<{ files: GeneratedFiles; inputTokens: number; outputTokens: number }> {
+  return holisticFix(
+    model,
+    component,
+    contract,
+    files,
+    findings,
+    componentIdentifier(component.slug),
+    childContracts,
+    availableTokens,
+  );
+}
+
+/**
  * Generates one component's full file set. Throws (does not commit
  * anything itself -- that's the caller's job, see the codegen route) if
  * the deterministic class-name check or the stories name-collision check
@@ -551,24 +630,26 @@ export async function generateComponentCode(
   const componentName = componentIdentifier(component.slug); // the JS identifier (never starts with a digit)
   const { contract, inputTokens: t1, outputTokens: o1 } = await generateContract(model, component, availableTokens);
 
-  const [tsx, css, stories] = await Promise.all([
-    generateTsx(model, component, contract, componentName, fileBase, childContracts),
-    generateCss(model, component, contract, availableTokens),
+  // TSX first, then generate the scss from the classes the TSX ACTUALLY
+  // references (extractReferencedClasses) so the two agree by construction --
+  // the parallel version let complex components (InputText's 10+ state classes)
+  // drift into an A3 "class referenced in tsx but missing from scss" mismatch
+  // the autofix couldn't always reconcile. Stories still run alongside the scss.
+  const tsx = await generateTsx(model, component, contract, componentName, fileBase, childContracts);
+  const requiredClasses = extractReferencedClasses(tsx.content);
+  const [css, stories] = await Promise.all([
+    generateCss(model, component, contract, availableTokens, undefined, requiredClasses),
     generateStories(model, component, contract, componentName, fileBase),
   ]);
 
-  const check = checkClassNamesMatch(tsx.content, css.content);
-  if (!check.ok) {
-    throw new Error(
-      `Generated ${componentName}: TSX references CSS Modules classes not defined in the stylesheet -- ` +
-        `${check.missingClasses.join(", ")}. Not committing a mismatched component.`,
-    );
-  }
-
-  const storiesCheck = checkStoriesNoNameCollision(stories.content, componentName);
-  if (!storiesCheck.ok) {
-    throw new Error(`Generated ${componentName}: ${storiesCheck.reason}`);
-  }
+  // NB: class-name (A3) and stories-collision (A4) mismatches are NOT thrown
+  // here anymore. generateComponentCode is only ever called by
+  // generateComponentCodeReviewed, whose review loop runs those exact
+  // deterministic gates and lets holisticFix repair them (add the missing scss
+  // class OR drop the tsx reference) -- a hard throw here aborted before the
+  // autofix could run (e.g. Inputtext referencing fieldError/fieldDefault). If
+  // the mismatch survives the loop, the reviewed path returns reviewPassed:false
+  // -> 422, so a mismatched component still never commits.
 
   const inputTokens = t1 + tsx.inputTokens + css.inputTokens + stories.inputTokens;
   const outputTokens = o1 + tsx.outputTokens + css.outputTokens + stories.outputTokens;
@@ -627,6 +708,7 @@ export async function generateComponentCodeReviewed(
     tokenVarNames: new Set(availableTokens.map((t) => toCssVarName(t.name)).filter(Boolean)),
     ownProps: buildOwnProps(contract),
     composedProps: buildComposedProps(component.uses, childContracts),
+    expectedComposedImports: buildExpectedComposedImports(component.uses, component.isIcon),
   };
 
   const files: GeneratedFiles = {
@@ -637,13 +719,14 @@ export async function generateComponentCodeReviewed(
   };
 
   const applyFix = (f: GeneratedFiles, findings: Finding[]) =>
-    holisticFix(model, component, contract, f, findings, componentName, childContracts);
+    holisticFix(model, component, contract, f, findings, componentName, childContracts, availableTokens);
 
   const review = await reviewAndFix({
     model,
     files,
     ctx,
     spec: component.designSpec,
+    composedApi: composedApiDescription(component, childContracts),
     applyFix,
   });
 

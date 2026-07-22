@@ -37,6 +37,30 @@ export function pascalCase(slug: string): string {
 }
 
 /**
+ * A Figma component NAME -> its kebab-case slug (URL/folder/DB identity anchor).
+ * Lives here, next to pascalCase/componentIdentifier, because the slug is the
+ * SOURCE the identifier is derived from -- and the two must round-trip: a name
+ * must slugify then componentIdentifier back to the same natural identifier the
+ * model writes. The critical step is inserting a `-` at camelCase/PascalCase
+ * word joins BEFORE lowercasing: without it "InputText" flattens to "inputtext"
+ * -> identifier "Inputtext", an unnatural name the model fights every generation
+ * (endless A5 export-name churn). With it "InputText" -> "input-text" ->
+ * identifier "InputText". Handles two joins: lower/digit->Upper and
+ * ACRONYM->Word (e.g. "URLField" -> "url-field").
+ */
+export function slugify(name: string): string {
+  return (
+    name
+      .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+      .replace(/([A-Z]+)([A-Z][a-z])/g, "$1-$2")
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "component"
+  );
+}
+
+/**
  * A VALID JS/React identifier for a slug. pascalCase alone can start with a
  * digit (slug "24-outline-orders" -> "24OutlineOrders"), which is a legal
  * FILENAME but an ILLEGAL identifier -- it breaks `export const`, `interface`,

@@ -5,7 +5,8 @@ import { getCurrentWorkspaceId } from "@/db/workspace";
 import { getFigmaConnectionStatus } from "@/lib/session";
 import { SetupNotice } from "@/components/setup-notice";
 import { saveDesignSettings, disconnectFigma } from "./actions";
-import { confirmAndMergePendingPr } from "./codegen-actions";
+import { confirmAndMergePendingPr, getCiTypecheckStatus } from "./codegen-actions";
+import { CiTypecheckPanel } from "./ci-typecheck-panel";
 import {
   clearUnsyncedComponents,
   clearCodeSyncedComponents,
@@ -43,7 +44,11 @@ async function loadSettingsData() {
   const figma = await getFigmaConnectionStatus();
   const components = await loadComponentSlugsForWorkspace(workspaceId);
   const cleanupCounts = await loadCleanupCounts(workspaceId);
-  return { ws, figma, components, cleanupCounts };
+  // Only meaningful once a PR is open (see designSystemPendingPrUrl below),
+  // but cheap enough (a "no-pr" short-circuit) to fetch alongside everything
+  // else the page needs.
+  const ciTypecheckStatus = await getCiTypecheckStatus();
+  return { ws, figma, components, cleanupCounts, ciTypecheckStatus };
 }
 
 function FigmaResultBanner({
@@ -88,7 +93,7 @@ export default async function DesignSettingsPage({
     return <SetupNotice error={loadError} />;
   }
 
-  const { ws, figma, components, cleanupCounts } = data;
+  const { ws, figma, components, cleanupCounts, ciTypecheckStatus } = data;
   const canSync = figma.connected && Boolean(ws.figmaFileKey);
   const codeSyncEnabled = ws.designComponentStack !== "none";
 
@@ -200,23 +205,27 @@ export default async function DesignSettingsPage({
         </p>
 
         {ws.designSystemPendingPrUrl && (
-          <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            <span>
-              A pull request is open --{" "}
-              <a href={ws.designSystemPendingPrUrl} target="_blank" rel="noreferrer" className="underline">
-                review it
-              </a>
-              , then confirm once its checks look right.
-            </span>
-            <form action={confirmAndMergePendingPr}>
-              <button
-                type="submit"
-                className="shrink-0 rounded-md bg-amber-900 px-3 py-1 text-xs text-white hover:bg-amber-800"
-              >
-                Confirm &amp; merge
-              </button>
-            </form>
-          </div>
+          <>
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <span>
+                A pull request is open --{" "}
+                <a href={ws.designSystemPendingPrUrl} target="_blank" rel="noreferrer" className="underline">
+                  review it
+                </a>
+                , then confirm once its checks look right.
+              </span>
+              <form action={confirmAndMergePendingPr}>
+                <button
+                  type="submit"
+                  className="shrink-0 rounded-md bg-amber-900 px-3 py-1 text-xs text-white hover:bg-amber-800"
+                >
+                  Confirm &amp; merge
+                </button>
+              </form>
+            </div>
+
+            <CiTypecheckPanel status={ciTypecheckStatus} />
+          </>
         )}
 
         {codeSyncEnabled ? (

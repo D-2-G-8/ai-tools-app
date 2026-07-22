@@ -1,5 +1,12 @@
 import { checkClassNamesMatch, checkStoriesNoNameCollision } from "../checks";
-import { parseJsxLiteralProps, parseStoriesArgs, type LiteralValue, type PropDomain, type ParsedProp } from "./prop-types";
+import {
+  parseJsxLiteralProps,
+  parseStoriesArgs,
+  parseCompositionImports,
+  type LiteralValue,
+  type PropDomain,
+  type ParsedProp,
+} from "./prop-types";
 import type { Finding, GeneratedFiles, ReviewContext } from "./types";
 
 function escapeRegExp(s: string): string {
@@ -183,6 +190,37 @@ function gateComposedPropValues(files: GeneratedFiles, ctx: ReviewContext): Find
   return out;
 }
 
+/** A7c: every parent-relative import in the tsx (`../<slug>` /
+ *  `../../icons|components/<slug>`) must correspond to a real composed
+ *  dependency (`uses`). Catches a hallucinated or renamed composition import --
+ *  e.g. `import { Edit } from "../../icons/edit"` when the composed icon is
+ *  `fill-edit`/`FillEdit` -- which breaks the build ("could not resolve
+ *  ../../icons/edit"). The LLM autofix has the exact valid import list. */
+function gateCompositionImports(files: GeneratedFiles, ctx: ReviewContext): Finding[] {
+  const out: Finding[] = [];
+  const valid = () =>
+    [...ctx.expectedComposedImports].map(([p, id]) => `{ ${id} } from "${p}"`).join("; ") || "(none -- this component composes nothing)";
+  for (const imp of parseCompositionImports(files.tsx)) {
+    const expectedName = ctx.expectedComposedImports.get(imp.path);
+    if (expectedName === undefined) {
+      out.push({
+        id: "composition-import",
+        severity: "build-breaking",
+        file: "tsx",
+        message: `tsx imports { ${imp.importedName} } from "${imp.path}", but no composed design-system component resolves to that path -- it won't build. Valid composition imports: ${valid()}.`,
+      });
+    } else if (expectedName !== imp.importedName) {
+      out.push({
+        id: "composition-import",
+        severity: "build-breaking",
+        file: "tsx",
+        message: `tsx imports { ${imp.importedName} } from "${imp.path}", but that path exports { ${expectedName} } -- use the exact name: import { ${expectedName} } from "${imp.path}".`,
+      });
+    }
+  }
+  return out;
+}
+
 export function runDeterministicGates(files: GeneratedFiles, ctx: ReviewContext): Finding[] {
   const findings: Finding[] = [];
 
@@ -226,6 +264,7 @@ export function runDeterministicGates(files: GeneratedFiles, ctx: ReviewContext)
 
   findings.push(...gateSelfPropValues(files, ctx));
   findings.push(...gateComposedPropValues(files, ctx));
+  findings.push(...gateCompositionImports(files, ctx));
 
   return findings;
 }
