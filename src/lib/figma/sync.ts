@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { designToken, designComponent, type DesignTokenCategory, type DesignComponentVariant, type DesignComponentState } from "@/db/schema";
 import { figmaGet, FIGMA_FILE_FETCH_TIMEOUT_MS, describeFigmaError } from "./client";
 import { deriveTokensFromComponents } from "@/lib/design-system-codegen/token-derive";
+import { slugify } from "@/lib/design-system-codegen/paths";
 
 /**
  * Pulls a Figma file's styles and components and upserts them into
@@ -292,15 +293,9 @@ function parseVariantName(name: string): { key: string; value: string }[] | null
   return pairs.every((p) => p !== null) ? (pairs as { key: string; value: string }[]) : null;
 }
 
-function slugify(name: string): string {
-  return (
-    name
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "component"
-  );
-}
+// slugify moved to ../design-system-codegen/paths.ts (imported above) so it
+// lives next to componentIdentifier and round-trips with it -- see its doc
+// comment for why camelCase boundaries matter (InputText -> input-text).
 
 interface NormalizedComponentSet {
   nodeId: string;
