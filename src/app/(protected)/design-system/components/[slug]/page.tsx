@@ -7,6 +7,7 @@ import { getCurrentWorkspaceId } from "@/db/workspace";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { figmaNodeUrl } from "@/lib/figma/links";
 import { storybookDefaultStoryId } from "@/lib/design-system-codegen/component";
+import { storybookStandUrl } from "@/lib/design-system-codegen/paths";
 import { ResyncComponentButton } from "./resync-component-button";
 import { GenerateWithDepsButton } from "./generate-with-deps-button";
 import { DeleteComponentButton } from "../delete-component-button";
@@ -34,16 +35,25 @@ async function loadComponent(slug: string) {
     .from(designComponent)
     .where(and(eq(designComponent.workspaceId, workspaceId), eq(designComponent.slug, slug)))
     .limit(1);
-  if (!component) return { component: undefined, figmaFileKey: undefined };
+  if (!component) return { component: undefined, figmaFileKey: undefined, standUrl: null };
 
-  // Only needed to build the "open in Figma" links below -- a second,
-  // cheap single-column select rather than widening the component query.
+  // Only needed to build the "open in Figma" links + the Storybook stand URL
+  // below -- a second, cheap select rather than widening the component query.
   const [ws] = await db
-    .select({ figmaFileKey: workspace.figmaFileKey })
+    .select({
+      figmaFileKey: workspace.figmaFileKey,
+      designSystemPendingPrBranch: workspace.designSystemPendingPrBranch,
+    })
     .from(workspace)
     .where(eq(workspace.id, workspaceId))
     .limit(1);
-  return { component, figmaFileKey: ws?.figmaFileKey ?? undefined };
+  const standUrl = ws?.designSystemPendingPrBranch
+    ? storybookStandUrl(
+        ws.designSystemPendingPrBranch,
+        process.env.DESIGN_SYSTEM_STORYBOOK_URL_TEMPLATE ?? process.env.DESIGN_SYSTEM_STORYBOOK_URL,
+      )
+    : null;
+  return { component, figmaFileKey: ws?.figmaFileKey ?? undefined, standUrl };
 }
 
 export default async function DesignComponentDetailPage({
@@ -52,7 +62,7 @@ export default async function DesignComponentDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const { component, figmaFileKey } = await loadComponent(slug);
+  const { component, figmaFileKey, standUrl } = await loadComponent(slug);
   if (!component) notFound();
 
   return (
@@ -128,7 +138,12 @@ export default async function DesignComponentDetailPage({
         </div>
       </section>
 
-      <DesignSystemPreview slug={component.slug} isIcon={component.isIcon} codeSyncStatus={component.codeSyncStatus} />
+      <DesignSystemPreview
+        slug={component.slug}
+        isIcon={component.isIcon}
+        codeSyncStatus={component.codeSyncStatus}
+        standUrl={standUrl}
+      />
 
       {component.figmaNodeIds.length > 0 && (
         <section className="text-xs text-neutral-400">
@@ -172,12 +187,14 @@ function DesignSystemPreview({
   slug,
   isIcon,
   codeSyncStatus,
+  standUrl,
 }: {
   slug: string;
   isIcon: boolean;
   codeSyncStatus: string;
+  standUrl: string | null;
 }) {
-  const storybookUrl = process.env.DESIGN_SYSTEM_STORYBOOK_URL?.replace(/\/+$/, "");
+  const storybookUrl = standUrl;
 
   if (!storybookUrl) {
     return (

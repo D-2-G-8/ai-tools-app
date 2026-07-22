@@ -125,3 +125,21 @@ export function storybookDefaultStoryId(slug: string, isIcon: boolean): string {
   const sanitizedComponentName = componentIdentifier(slug).toLowerCase();
   return `${isIcon ? "icons" : "components"}-${sanitizedComponentName}--default`;
 }
+
+/** A git branch name -> the slug Vercel uses in its deterministic branch alias
+ *  `<project>-git-<slug>-<team>.vercel.app` (lowercase, non-alphanumeric -> "-"). */
+export function vercelBranchSlug(branch: string): string {
+  return branch.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/** The Storybook stand base URL for a branch, from a template that MAY contain a
+ *  `{branch}` placeholder (set once, e.g.
+ *  "https://design-system-git-{branch}-<team>.vercel.app"). No placeholder ->
+ *  the template verbatim (a single fixed stand). Null if the template is unset.
+ *  Trailing slashes trimmed. NB: Vercel truncates+hashes branch names >~63 chars
+ *  -- our figma-sync-<ts> branches are short, so the alias is exact. */
+export function storybookStandUrl(branch: string, template: string | undefined): string | null {
+  if (!template) return null;
+  const base = template.includes("{branch}") ? template.replace(/\{branch\}/g, vercelBranchSlug(branch)) : template;
+  return base.replace(/\/+$/, "");
+}
