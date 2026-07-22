@@ -9,6 +9,7 @@ import { figmaNodeUrl } from "@/lib/figma/links";
 import { storybookDefaultStoryId } from "@/lib/design-system-codegen/component";
 import { storybookStandUrl } from "@/lib/design-system-codegen/paths";
 import { ResyncComponentButton } from "./resync-component-button";
+import { VisualReviewButton } from "./visual-review-button";
 import { GenerateWithDepsButton } from "./generate-with-deps-button";
 import { DeleteComponentButton } from "../delete-component-button";
 
@@ -128,6 +129,11 @@ export default async function DesignComponentDetailPage({
           <GenerateWithDepsButton slug={component.slug} name={component.name} />
         </div>
         <ResyncComponentButton slug={component.slug} />
+        {component.codeSyncStatus === "committed" && (
+          <div className="mt-3 border-t border-neutral-100 pt-3">
+            <VisualReviewButton slug={component.slug} />
+          </div>
+        )}
         <div className="mt-3 border-t border-neutral-100 pt-3">
           <DeleteComponentButton
             slug={component.slug}
