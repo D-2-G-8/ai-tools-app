@@ -17,7 +17,7 @@ export default async function MockupViewPage({
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <Link href="/design-system/mockups" className="text-sm text-neutral-500 hover:underline">
+        <Link href="/mockups" className="text-sm text-neutral-500 hover:underline">
           ← Back to mockups
         </Link>
       </div>
@@ -36,10 +36,10 @@ export default async function MockupViewPage({
         <div className="flex items-center gap-3 text-xs text-neutral-500">
           {m.source !== "figma" && (
             <>
-              <Link href={`/design-system/mockups/${m.id}/edit`} className="hover:underline">
+              <Link href={`/mockups/${m.id}/edit`} className="hover:underline">
                 Edit
               </Link>
-              <a href={`/design-system/mockups/${m.id}/download`} className="hover:underline">
+              <a href={`/mockups/${m.id}/download`} className="hover:underline">
                 Download
               </a>
             </>
@@ -68,13 +68,12 @@ export default async function MockupViewPage({
               <h3 className="mb-2 text-xs font-medium text-neutral-500">Design-system components on this screen</h3>
               <div className="flex flex-wrap gap-2">
                 {m.usesComponents.map((slug) => (
-                  <Link
+                  <span
                     key={slug}
-                    href={`/design-system/components/${slug}`}
-                    className="rounded border border-neutral-200 px-2 py-0.5 text-xs text-neutral-700 hover:bg-neutral-50"
+                    className="rounded border border-neutral-200 px-2 py-0.5 text-xs text-neutral-700"
                   >
                     {slug}
-                  </Link>
+                  </span>
                 ))}
               </div>
             </div>
@@ -93,7 +92,7 @@ export default async function MockupViewPage({
       ) : (
         <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white">
           <iframe
-            src={`/design-system/mockups/${m.id}/render`}
+            src={`/mockups/${m.id}/render`}
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"
             title={m.name}

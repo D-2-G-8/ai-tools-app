@@ -65,7 +65,7 @@ export async function uploadMockup(formData: FormData) {
     }
   }
 
-  revalidatePath("/design-system/mockups");
+  revalidatePath("/mockups");
 }
 
 /**
@@ -88,7 +88,7 @@ export async function syncMockupsFromFigmaAction(
     }
 
     const result = await syncMockupsFromFigma(workspaceId, refs);
-    revalidatePath("/design-system/mockups");
+    revalidatePath("/mockups");
     return result;
   } catch (err) {
     return { imported: 0, removed: 0, errors: [], error: err instanceof Error ? err.message : String(err) };
@@ -147,7 +147,7 @@ export async function rebuildScreenOnDs(mockupId: string): Promise<{ ok: boolean
     ]);
     const { prUrl } = await finishCodeGenSession(branch);
 
-    revalidatePath("/design-system/mockups");
+    revalidatePath("/mockups");
     return { ok: true, prUrl };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -168,7 +168,7 @@ export async function deleteMockup(id: string) {
     if (row.previewBlobUrl) await del(row.previewBlobUrl).catch(() => {});
     await db.delete(mockup).where(eq(mockup.id, id));
   }
-  revalidatePath("/design-system/mockups");
+  revalidatePath("/mockups");
 }
 
 /** Saves edited HTML content from the mockup edit page — mirrors documents/actions.ts updateDocumentContent. */
@@ -182,7 +182,7 @@ export async function updateMockupContent(id: string, formData: FormData) {
     .where(and(eq(mockup.id, id), eq(mockup.workspaceId, workspaceId)))
     .limit(1);
   if (!row) {
-    redirect("/design-system/mockups");
+    redirect("/mockups");
   }
 
   const previousBlobUrl = row.blobUrl;
@@ -207,7 +207,7 @@ export async function updateMockupContent(id: string, formData: FormData) {
       .where(eq(mockup.id, id));
   }
 
-  revalidatePath("/design-system/mockups");
-  revalidatePath(`/design-system/mockups/${id}`);
-  redirect(`/design-system/mockups/${id}`);
+  revalidatePath("/mockups");
+  revalidatePath(`/mockups/${id}`);
+  redirect(`/mockups/${id}`);
 }

@@ -24,7 +24,7 @@ import { PresenceHeartbeat } from "@/components/presence-heartbeat";
 const navItems = [
   { href: "/", label: "Overview" },
   { href: "/documents", label: "Documents" },
-  { href: "/design-system", label: "Design System" },
+  { href: "/mockups", label: "Mockups" },
   { href: "/history", label: "History" },
   { href: "/company", label: "Company" },
   { href: "/settings", label: "Settings" },

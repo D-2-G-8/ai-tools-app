@@ -20,7 +20,7 @@ export default async function MockupEditPage({
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link href={`/design-system/mockups/${m.id}`} className="text-sm text-neutral-500 hover:underline">
+        <Link href={`/mockups/${m.id}`} className="text-sm text-neutral-500 hover:underline">
           ← Back to mockup
         </Link>
       </div>
@@ -52,7 +52,7 @@ export default async function MockupEditPage({
             >
               Save
             </button>
-            <Link href={`/design-system/mockups/${m.id}`} className="text-sm text-neutral-500 hover:underline">
+            <Link href={`/mockups/${m.id}`} className="text-sm text-neutral-500 hover:underline">
               Cancel
             </Link>
           </div>

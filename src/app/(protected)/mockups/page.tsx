@@ -102,12 +102,12 @@ export default async function MockupsPage() {
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
-                  <Link href={`/design-system/mockups/${m.id}`} className="text-xs text-neutral-600 hover:underline">
+                  <Link href={`/mockups/${m.id}`} className="text-xs text-neutral-600 hover:underline">
                     View
                   </Link>
                   {m.source !== "figma" && (
                     <Link
-                      href={`/design-system/mockups/${m.id}/edit`}
+                      href={`/mockups/${m.id}/edit`}
                       className="text-xs text-neutral-600 hover:underline"
                     >
                       Edit
