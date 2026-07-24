@@ -12,7 +12,7 @@ import { designComponent } from "@/db/schema";
 import { getEffectiveModel } from "@/lib/tools/model-settings";
 import { commitFiles } from "@/lib/github/client";
 import { getOrOpenSessionBranch } from "@/lib/design-system-codegen/session";
-import { finishCodeGenSession } from "../settings/codegen-actions";
+import { finishCodeGenSession } from "@/lib/design-system-codegen/session-actions";
 import {
   parseFigmaRef,
   syncMockupsFromFigma,
