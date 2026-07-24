@@ -5,7 +5,12 @@ import { exchangeFigmaCode, getPublicOrigin } from "@/lib/figma/oauth";
 
 export const dynamic = "force-dynamic";
 
-const SETTINGS_PATH = "/design-system/settings";
+// The design-system tool's Settings page (which used to show "Connect
+// Figma" / connection status) has been removed; redirect to the app's
+// general Settings page instead so this doesn't 404. No page currently
+// renders Figma connection status or reads the figma=connected/error
+// query params below -- see AGENTS.md / task history for context.
+const SETTINGS_PATH = "/settings";
 
 interface FigmaMe {
   email?: string;
