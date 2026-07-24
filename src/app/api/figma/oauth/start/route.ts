@@ -6,7 +6,10 @@ import { buildFigmaAuthorizeUrl, getPublicOrigin } from "@/lib/figma/oauth";
 export const dynamic = "force-dynamic";
 
 /**
- * Kicks off the "Connect Figma" flow from the design-system Settings page.
+ * Kicks off the "Connect Figma" flow. Not currently linked from any UI --
+ * the design-system tool's Settings page (the only place that used to
+ * surface "Connect Figma") has been removed; src/lib/figma/client.ts falls
+ * back to the FIGMA_ACCESS_TOKEN env var when no OAuth session exists.
  * A plain link (not a Server Action) on purpose -- this needs to issue a
  * real 302 to www.figma.com, which a Server Action can't do cleanly for an
  * external origin.

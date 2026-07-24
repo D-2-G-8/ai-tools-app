@@ -3,11 +3,11 @@ import { toolSettings, workspace } from "@/db/schema";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { getCurrentUser } from "@/db/users";
-import { getSecretsStatus } from "@/lib/session";
+import { getSecretsStatus, getFigmaConnectionStatus } from "@/lib/session";
 import { AVAILABLE_MODELS, DEFAULT_MODEL_ID } from "@/lib/models";
 import { TOOLS } from "@/lib/tools/registry";
 import { SetupNotice } from "@/components/setup-notice";
-import { saveGeneralSettings, clearSecrets, saveToolModel } from "./actions";
+import { saveGeneralSettings, clearSecrets, saveToolModel, disconnectFigma } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +17,7 @@ async function loadSettingsData() {
 
   const [ws] = await db.select().from(workspace).where(eq(workspace.id, workspaceId)).limit(1);
   const secrets = await getSecretsStatus();
+  const figma = await getFigmaConnectionStatus();
 
   // Model settings are per-user (see src/lib/tools/model-settings.ts) --
   // fetch the signed-in user's own rows plus any legacy company-wide row
@@ -37,10 +38,39 @@ async function loadSettingsData() {
   const personalByTool = new Map(rows.filter((r) => r.userId === currentUser?.id).map((s) => [s.toolKey, s]));
   const legacyByTool = new Map(rows.filter((r) => r.userId === null).map((s) => [s.toolKey, s]));
 
-  return { ws, secrets, personalByTool, legacyByTool };
+  return { ws, secrets, figma, personalByTool, legacyByTool };
 }
 
-export default async function SettingsPage() {
+function FigmaResultBanner({
+  sp,
+}: {
+  sp: { [key: string]: string | string[] | undefined };
+}) {
+  const status = typeof sp.figma === "string" ? sp.figma : undefined;
+  if (!status) return null;
+
+  if (status === "connected") {
+    return (
+      <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">Figma connected.</p>
+    );
+  }
+  if (status === "disconnected") {
+    return <p className="rounded-md bg-neutral-100 px-3 py-2 text-sm text-neutral-600">Figma disconnected.</p>;
+  }
+  if (status === "error") {
+    const message = typeof sp.figmaMessage === "string" ? sp.figmaMessage : "Something went wrong.";
+    return <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{message}</p>;
+  }
+  return null;
+}
+
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const sp = await searchParams;
+
   let data: Awaited<ReturnType<typeof loadSettingsData>> | null = null;
   let loadError: unknown = null;
   try {
@@ -53,7 +83,7 @@ export default async function SettingsPage() {
     return <SetupNotice error={loadError} />;
   }
 
-  const { ws, secrets, personalByTool, legacyByTool } = data;
+  const { ws, secrets, figma, personalByTool, legacyByTool } = data;
 
   return (
       <div className="flex flex-col gap-10 max-w-3xl">
@@ -63,6 +93,8 @@ export default async function SettingsPage() {
             URLs are stored permanently. Tokens live only for the browser session and are never written to the DB.
           </p>
         </div>
+
+        <FigmaResultBanner sp={sp} />
 
         <section className="rounded-lg border border-neutral-200 bg-white p-5">
           <h2 className="text-sm font-medium text-neutral-700 mb-4">GitLab and LLM provider</h2>
@@ -152,6 +184,35 @@ export default async function SettingsPage() {
               Forget all tokens now
             </button>
           </form>
+        </section>
+
+        <section className="rounded-lg border border-neutral-200 bg-white p-5">
+          <h2 className="text-sm font-medium text-neutral-700 mb-1">Figma account</h2>
+          <p className="mb-4 text-xs text-neutral-400">
+            Each person connects their own Figma account -- whichever login is convenient for them (personal,
+            a work seat, whatever), independent of the Google account used to sign into this app. Nobody needs
+            to standardize accounts across systems just to sync the design system.
+          </p>
+
+          {figma.connected ? (
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-neutral-600">
+                Connected{figma.figmaUserHandle ? ` as ${figma.figmaUserHandle}` : ""}
+              </span>
+              <form action={disconnectFigma}>
+                <button type="submit" className="text-xs text-red-600 hover:underline">
+                  Disconnect
+                </button>
+              </form>
+            </div>
+          ) : (
+            <a
+              href="/api/figma/oauth/start"
+              className="inline-block rounded-md bg-neutral-900 px-4 py-1.5 text-sm text-white hover:bg-neutral-700"
+            >
+              Connect Figma
+            </a>
+          )}
         </section>
 
         <section className="rounded-lg border border-neutral-200 bg-white p-5">
