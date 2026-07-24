@@ -1,12 +1,13 @@
 "use server";
 
+import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { workspace, toolSettings } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getCurrentWorkspaceId } from "@/db/workspace";
 import { getCurrentUser } from "@/db/users";
-import { updateSessionSecrets, clearSessionSecrets } from "@/lib/session";
+import { updateSessionSecrets, clearSessionSecrets, disconnectFigmaSession } from "@/lib/session";
 
 export async function saveGeneralSettings(formData: FormData) {
   const workspaceId = await getCurrentWorkspaceId();
@@ -44,6 +45,13 @@ export async function saveGeneralSettings(formData: FormData) {
 export async function clearSecrets() {
   await clearSessionSecrets();
   revalidatePath("/settings");
+}
+
+/** "Disconnect" button next to the Figma connection status. */
+export async function disconnectFigma() {
+  await disconnectFigmaSession();
+  revalidatePath("/settings");
+  redirect("/settings?figma=disconnected");
 }
 
 /**
